@@ -242,6 +242,27 @@ h2 .muted{font-family:'Barlow',system-ui,sans-serif;font-size:15px;font-weight:5
 .selwrap select{width:100%;font:inherit;font-size:17px;font-weight:600;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:11px 12px}
 .diagl{margin:0;font-size:14px;font-weight:600;color:var(--ink)}
 .camboard{display:block;margin:0 auto;width:220px;max-width:100%;height:auto}
+.finds{display:flex;flex-direction:column;gap:6px}
+.find{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--red);border-radius:10px;padding:8px 12px;display:flex;flex-direction:column}
+.find.ok{border-left-color:var(--green)}
+.find b{font-weight:600}
+.find span{font-size:14px;color:var(--muted)}
+.coachbox{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:10px 0;line-height:1.5}
+.coachbox p{margin:0 0 6px}
+.clist{margin:0 0 4px;padding-left:20px}
+.small{font-size:13px}
+.drills{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.drill{display:flex;justify-content:space-between;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 8px 10px 12px}
+.drill>div{display:flex;flex-direction:column;min-width:0;font-size:14px;gap:1px}
+.drill b{font-size:16px}
+.drill.done{border-color:var(--green)}
+.drill .res{color:var(--green);font-weight:600}
+.filebtn{display:inline-block;cursor:pointer;margin-bottom:6px}
+.filebtn.off{opacity:.5;pointer-events:none}
+.chat{display:flex;flex-direction:column;gap:6px;margin:0 0 10px}
+.bubble{max-width:88%;padding:8px 12px;border-radius:12px;line-height:1.45;font-size:15px}
+.bubble.user{align-self:flex-end;background:var(--ink);color:var(--bg);border-bottom-right-radius:4px}
+.bubble.assistant{align-self:flex-start;background:var(--surface);border:1px solid var(--line);border-bottom-left-radius:4px}
 </style>
 </head>
 <body>
@@ -394,7 +415,7 @@ const MODES={
     prompt(g,p){return p.isIn&&checkout(p.score,3,g.opts.out)?`${p.name}, du brauchst ${p.score}`:nameOnly(g,p);},
     aim(g,p){if(!p.isIn) return {seg:20,mult:2};return finishAim(p.score,3-g.visit.length,g.opts.out);},
     stats(g){return g.players.map(p=>[p.name,`Ø ${fmt(MODES.x01.avg(p))}, beste Aufnahme ${p.best}${(g.opts.legs||1)>1||(g.opts.sets||1)>1?`, ${p.legsWon} Legs`:''}`]);},
-    record(g,p){return {scored:p.scoredPrev+g.opts.start-p.score,best:p.best,f9:p.f9,f9d:p.f9d,v100:p.v100,v140:p.v140,v180:p.v180,coAtt:p.coAtt,coHit:p.coHit,checkout:p.finish,legsWon:p.legsWon,bestLeg:p.bestLeg||0};}
+    record(g,p){return {scored:p.scoredPrev+g.opts.start-p.score,best:p.best,f9:p.f9,f9d:p.f9d,v100:p.v100,v140:p.v140,v180:p.v180,coAtt:p.coAtt,coHit:p.coHit,checkout:p.finish,legsWon:p.legsWon,bestLeg:p.bestLeg||0,vs:p.vs||[]};}
   },
   cricket:{
     name:'Cricket',desc:'15 bis 20 und Bull schließen, Punkte sammeln',
@@ -579,6 +600,7 @@ const MODES={
   }
 };
 function countVisit(p,s){
+  (p.vs=p.vs||[]).push(s);
   if(p.visits<3) p.f9+=s;
   p.visits++;
   p.best=Math.max(p.best,s);
@@ -905,7 +927,7 @@ function renderSetup(){
     `<div class="resume"><span>Laufendes Spiel<small>${esc(MODES[saved.g.mode].name)} mit ${saved.g.players.map(p=>esc(p.name)).join(', ')}</small></span><button class="primary" data-act="resume">Fortsetzen</button></div>`:'';
   const seg=(attr,choices,cur,lab)=>`<div class="seg" role="group" aria-label="${lab}">${choices.map((c,i)=>`<button ${attr}="${i}" class="${cur===c[0]?'on':''}" aria-pressed="${cur===c[0]}">${c[1]}</button>`).join('')}</div>`;
   app.innerHTML=`<div class="wrap">
-  <header class="top"><div class="toprow"><h1 class="brand">${LOGO}Pfeilerl</h1></div><p>Dart zählen, ganz ohne Kopfrechnen</p><div class="tbtns"><button class="ghost" data-act="tour">Turnier${tour?' läuft':''}</button><button class="ghost" data-act="online">Online</button><button class="ghost" data-act="cam">Kamera${cam.active?' an':''}</button><button class="ghost" data-act="stats">Statistik</button></div></header>
+  <header class="top"><div class="toprow"><h1 class="brand">${LOGO}Pfeilerl</h1></div><p>Dart zählen, ganz ohne Kopfrechnen</p><div class="tbtns"><button class="ghost" data-act="coach">Trainer</button><button class="ghost" data-act="tour">Turnier${tour?' läuft':''}</button><button class="ghost" data-act="online">Online</button><button class="ghost" data-act="cam">Kamera${cam.active?' an':''}</button><button class="ghost" data-act="stats">Statistik</button></div></header>
   ${resume}
   <section><h2>Spielmodus</h2>${CATS.map(([c,cn])=>`<h3 class="cath">${cn}</h3><div class="modes">${Object.entries(MODES).filter(([,x])=>x.cat===c).map(([k,x])=>
     `<button class="mode ${k===setup.mode?'on':''}" data-mode="${k}" aria-pressed="${k===setup.mode}"><span class="mname">${x.name}</span><span class="mdesc">${x.desc}</span></button>`).join('')}</div>`).join('')}</section>
@@ -933,7 +955,7 @@ function startGame(fromSaved,cfg){
   else{
     const mode=cfg?cfg.mode:setup.mode,m=MODES[mode];
     if(!cfg&&m.minPlayers&&setup.players.length<m.minPlayers){setupErr=`${m.name} braucht mindestens ${m.minPlayers} Spieler. Füge einen Mitspieler oder Computer hinzu.`;renderSetup();return;}
-    game={gid:newId(),tour:cfg?cfg.tour:null,mode,opts:clone(cfg?cfg.opts:setup.opts[mode]),players:cfg?clone(cfg.players):setup.players.map((pl,i)=>({name:(pl.name||'').trim()||'Spieler '+(i+1),bot:pl.bot||0})),cur:0,round:1,visit:[],locked:false,bust:false,winner:null,msg:''};
+    game={gid:newId(),tour:cfg?cfg.tour||null:null,drill:cfg&&cfg.drill?cfg.drill:null,mode,opts:clone(cfg?cfg.opts:setup.opts[mode]),players:cfg?clone(cfg.players):setup.players.map((pl,i)=>({name:(pl.name||'').trim()||'Spieler '+(i+1),bot:pl.bot||0})),cur:0,round:1,visit:[],locked:false,bust:false,winner:null,msg:''};
     m.init(game);history=[];saveGame();
   }
   setupErr='';quitArmed=false;
@@ -1031,7 +1053,7 @@ function undo(){
   const was=!!game.winner,gid=game.gid;
   game=history.pop();
   while(history.length&&game.players[game.cur].bot&&!game.winner&&game.players.some(p=>!p.bot)) game=history.pop();
-  if(was&&!game.winner){deleteRecord(gid);revertTour(game);}
+  if(was&&!game.winner){deleteRecord(gid);revertTour(game);drillDone(game,true);}
   if(window.speechSynthesis) try{speechSynthesis.cancel()}catch(e){}
   saveGame();update();
 }
@@ -1062,7 +1084,7 @@ function endGame(toT){
   if(window.speechSynthesis) try{speechSynthesis.cancel()}catch(e){}
   store.del('dart.game');game=null;history=[];
   if(wakeLock){wakeLock.release().catch(()=>{});wakeLock=null;}
-  if(toT===true) renderTour(); else renderSetup();
+  if(toT===true) renderTour(); else if(toT==='coach') openCoach(); else renderSetup();
   window.scrollTo(0,0);
 }
 
@@ -1101,9 +1123,9 @@ function update(){
       <p class="ovk">${esc(game.msg||'Spiel vorbei')}</p>
       <h2 id="ovh" class="cond">${names.length>1?'Unentschieden: '+names.join(' und '):names[0]+' gewinnt'}</h2>
       <ul class="stats">${m.stats(game).map(s=>`<li><span>${esc(s[0])}</span><span>${esc(s[1])}</span></li>`).join('')}</ul>
-      ${achHTML}<div class="ovbtns">${game.tour?'<button class="primary" id="again">Zum Turnier</button>':'<button class="primary" id="again">Revanche</button><button class="ghost" id="newg">Neues Spiel</button>'}<button class="ghost" id="undo2">Letzten Wurf zurücknehmen</button></div></div></div>`;
-    document.getElementById('again').onclick=game.tour?toTour:rematch;
-    if(!game.tour) document.getElementById('newg').onclick=endGame;
+      ${achHTML}<div class="ovbtns">${game.drill?'<button class="primary" id="again">Zurück zum Trainer</button>':game.tour?'<button class="primary" id="again">Zum Turnier</button>':'<button class="primary" id="again">Revanche</button><button class="ghost" id="newg">Neues Spiel</button>'}<button class="ghost" id="undo2">Letzten Wurf zurücknehmen</button></div></div></div>`;
+    document.getElementById('again').onclick=game.drill?toCoach:game.tour?toTour:rematch;
+    if(!game.tour&&!game.drill) document.getElementById('newg').onclick=endGame;
     document.getElementById('undo2').onclick=undo;
     document.getElementById('again').focus();
   } else ov.innerHTML='';
@@ -1305,7 +1327,7 @@ function drawStats(){
 function statsClick(t){
   const a=t.dataset.act;
   if(a==='stats'){renderStats();return;}
-  if(a==='back'){sv.open=false;cam.calSlot=-1;cam.calPts=[];onlView.step='menu';renderSetup();window.scrollTo(0,0);return;}
+  if(a==='back'){if(coach.ctl) coach.ctl.abort();sv.open=false;cam.calSlot=-1;cam.calPts=[];onlView.step='menu';renderSetup();window.scrollTo(0,0);return;}
   if(t.dataset.smode){sv.mode=t.dataset.smode;sv.armed=null;drawStats();return;}
   if(t.dataset.splayer!==undefined){sv.player=t.dataset.splayer;drawStats();return;}
   if(t.dataset.train!==undefined){const tp=(sv.tips||[])[+t.dataset.train];if(tp){setup.mode=tp.mode;setup.opts[tp.mode]=Object.assign({},setup.opts[tp.mode],tp.opts);saveSetup();}sv.open=false;renderSetup();window.scrollTo(0,0);return;}
@@ -1499,7 +1521,7 @@ function revertTour(g){
   if(tour.fmt==='ko') resolveKO();
   saveTour();
 }
-function onFinish(){saveRecord(buildRecord(game));applyTour(game);}
+function onFinish(){saveRecord(buildRecord(game));applyTour(game);drillDone(game);}
 const toTour=()=>endGame(true);
 
 /* ---------- Online ---------- */
@@ -1851,11 +1873,272 @@ async function camClick(t){
   if(a==='calcancel'){cam.calSlot=-1;cam.calPts=[];renderCam();}
 }
 
+/* ---------- Trainer ---------- */
+let sampleP=null;
+const getSample=()=>sampleP||(sampleP=(async()=>{try{if(!window.claude||typeof window.claude.use!=='function') return null;return await window.claude.use('sample');}catch(e){return null;}})());
+const coach={player:null,recs:[],busy:'',err:'',ctl:null,techBusy:false,chatBusy:false,fbBusy:false,ai:false,imgOK:false,imgMax:0,data:null,F:[]};
+let coachData=store.get('dart.coach')||{};
+const saveCoach=()=>store.set('dart.coach',coachData);
+const cd=()=>coachData[coach.player]||(coachData[coach.player]={analysis:null,plan:[],chat:[],feedback:'',tech:''});
+const onCoach=()=>{const el=document.querySelector('.gmode');return !!el&&el.textContent==='Trainer';};
+const avgArr=a=>a.reduce((s,v)=>s+v,0)/a.length;
+const fmtText=t=>esc(t).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/\n/g,'<br>');
+const TECH={
+  rechts:{titel:'Dart driftet nach rechts',text:'Häufig wandert der Ellbogen beim Abwurf nach außen oder die Schulter steht nicht in Wurfrichtung. Prüfe vor dem Spiegel, ob Auge, Dart und Ziel eine Linie bilden und der Arm nach dem Abwurf gerade zum Ziel zeigt.'},
+  links:{titel:'Dart driftet nach links',text:'Oft dreht das Handgelenk beim Loslassen ein oder der Arm zieht quer vor den Körper. Halte den Ellbogen ruhig und lass die Hand nach dem Abwurf gerade zum Ziel auslaufen.'},
+  gruppe:{titel:'Gruppierung zu breit',text:'Gleicher Griff, gleiche Abwurfposition und gleicher Rhythmus bei jedem Dart sind wichtiger als Kraft. Markiere dir den Griffpunkt am Barrel und wirf ruhiger statt fester.'},
+  schwank:{titel:'Ungleichmäßige Aufnahmen',text:'Eine feste Routine hilft: gleicher Stand, einmal durchatmen, zielen, werfen. Zwischen den Darts nicht hetzen, aber auch nicht zu lange zielen.'},
+  muede:{titel:'Konzentration lässt nach',text:'Wird die zweite Spielhälfte schwächer, fehlt oft Wurf-Ausdauer. Kurze, regelmäßige Einheiten von 20 bis 30 Minuten bringen mehr als selten lange.'},
+  doppel:{titel:'Doubles mit System',text:'Wähle feste Lieblings-Doubles, etwa D16 und D20, und spiele Finishes gezielt darauf. Ziel ist die Mitte des Doubles, nicht der Draht.'},
+  finish:{titel:'Finish-Wege kennen',text:'Plane den Weg schon beim Scoring: Lass dir gerade Reste wie 40 oder 32 stehen und nutze die Checkout-Vorschläge der App als Lernhilfe.'},
+  basis:{titel:'Basis festigen',text:'Stabiler Stand mit dem Wurfarm-Fuß vorne, ruhiger Oberkörper und ein gerader Follow-through zum Ziel. Ohne auffällige Schwäche bringt Wurf-Konstanz am meisten.'}
+};
+function analyze(name,es){
+  const F=[],data={spieler:name,spiele_gesamt:es.length,modi:{}};
+  const x=X(es);
+  if(x.length){
+    const a=agg(x,'x01'),vs=x.flatMap(e=>e.vs||[]);
+    const d={spiele:x.length,average:+a.avg.toFixed(1),first9:+a.f9.toFixed(1),doppelquote_prozent:a.coq==null?null:Math.round(a.coq),hoechste_aufnahme:a.best,hoechstes_finish:a.co,aufnahmen_100_bis_139:a.v100,aufnahmen_140_bis_179:a.v140,aufnahmen_180:a.v180,average_letzte_spiele:a.trend.slice(-10).map(v=>+v.toFixed(1))};
+    if(vs.length>=15){
+      const m=avgArr(vs),sd=Math.sqrt(vs.reduce((s,v)=>s+(v-m)**2,0)/vs.length);
+      Object.assign(d,{aufnahmen_gezaehlt:vs.length,aufnahme_schnitt:+m.toFixed(1),aufnahme_streuung:+sd.toFixed(1)});
+      const f=[],l=[];x.forEach(e=>{const v=e.vs||[];if(v.length>=6){const h=Math.floor(v.length/2);f.push(...v.slice(0,h));l.push(...v.slice(h));}});
+      if(f.length>=6&&l.length>=6){
+        const fm=avgArr(f),lm=avgArr(l);d.aufnahme_schnitt_erste_spielhaelfte=+fm.toFixed(1);d.aufnahme_schnitt_zweite_spielhaelfte=+lm.toFixed(1);
+        if(fm-lm>10) F.push({id:'muede',t:'Leistung fällt im Spiel ab',d:`Erste Spielhälfte im Schnitt ${fmt(fm)} Punkte pro Aufnahme, zweite Hälfte ${fmt(lm)}.`,lvl:'warn'});
+      }
+      if(m>0&&sd>m*0.55) F.push({id:'schwank',t:'Aufnahmen schwanken stark',d:`Im Schnitt ${fmt(m)} Punkte pro Aufnahme bei einer Streuung von ±${fmt(sd)}.`,lvl:'warn'});
+    }
+    if(a.coq!=null&&sumOf(x,'coAtt')>=6) F.push(a.coq<30?{id:'doppel',t:'Doubles kosten dich Legs',d:`Doppelquote ${Math.round(a.coq)} %. Gute Amateure liegen bei 30 bis 40 %.`,lvl:'warn'}:{id:'doppelgut',t:'Doppelquote solide',d:`${Math.round(a.coq)} % deiner Darts auf ein Finish-Double treffen.`,lvl:'ok'});
+    if(a.f9-a.avg>12) F.push({id:'finish',t:'Punkte gehen im Finish verloren',d:`First 9 im Schnitt ${fmt(a.f9)}, Gesamtschnitt ${fmt(a.avg)}.`,lvl:'warn'});
+    data.modi.x01=d;
+  }
+  const hm={};es.filter(e=>e.mode==='x01'||e.mode==='score100').forEach(e=>{for(const k in (e.hm||{})) hm[k]=(hm[k]||0)+e.hm[k];});
+  const g=k=>hm[k]||0,t20=g('T20'),s20=g('S20')+g('D20'),r1=g('S1')+g('T1')+g('D1'),l5=g('S5')+g('T5')+g('D5'),tot=t20+s20+r1+l5;
+  if(tot>=30){
+    const pc=n=>Math.round(n/tot*100);
+    data.wuerfe_rund_um_die_20={darts:tot,triple_20_prozent:pc(t20),single_oder_double_20_prozent:pc(s20),rechts_in_der_1_prozent:pc(r1),links_in_der_5_prozent:pc(l5)};
+    if(r1>l5*1.6&&r1/tot>0.15) F.push({id:'rechts',t:'Tendenz nach rechts',d:`${pc(r1)} % deiner Darts rund um die 20 landen in der 1, nur ${pc(l5)} % in der 5.`,lvl:'warn'});
+    else if(l5>r1*1.6&&l5/tot>0.15) F.push({id:'links',t:'Tendenz nach links',d:`${pc(l5)} % deiner Darts rund um die 20 landen in der 5, nur ${pc(r1)} % in der 1.`,lvl:'warn'});
+    if(t20/tot<0.12) F.push({id:'gruppe',t:'Triple 20 selten getroffen',d:`Nur ${pc(t20)} % deiner Darts rund um die 20 sind Triple.`,lvl:'warn'});
+    else if(t20/tot>0.25) F.push({id:'t20gut',t:'Starke Triple-Quote',d:`${pc(t20)} % deiner Darts rund um die 20 landen im Triple.`,lvl:'ok'});
+  }
+  const byMode={};es.forEach(e=>{if(e.mode!=='x01'&&MODES[e.mode]) (byMode[e.mode]=byMode[e.mode]||[]).push(e);});
+  for(const k in byMode){
+    const a=agg(byMode[k],k),o={uebung:MODES[k].name,spiele:a.n,siege:a.w};
+    for(const key in a) if(!['n','w','pct','trend','main'].includes(key)&&typeof a[key]==='number'&&isFinite(a[key])) o[key]=+a[key].toFixed(1);
+    o.verlauf=(a.trend||[]).slice(-5).map(v=>+(+v).toFixed(1));
+    data.modi[k]=o;
+  }
+  return {data,F};
+}
+function sanitizePlan(p){
+  return (Array.isArray(p)?p:[]).filter(d=>d&&MODES[d.mode]&&!MODES[d.mode].minPlayers).slice(0,5).map(d=>{
+    const m=MODES[d.mode],o=Object.assign({},DEFAULTS.opts[d.mode]||{});
+    m.options.forEach(op=>{const v=d.opts?d.opts[op.key]:undefined,ch=op.choices.find(c=>String(c[0])===String(v));if(ch) o[op.key]=ch[0];});
+    return {mode:d.mode,opts:o,ziel:String(d.ziel||''),warum:String(d.warum||''),done:false,result:''};
+  });
+}
+function localPlan(es){
+  const plan=[{mode:'atc',opts:{multi:false},ziel:'Locker einwerfen, Trefferquote über 40 %',warum:'Aufwärmen und Rhythmus finden.'}]
+    .concat(trainingTips(es).map(t=>({mode:t.mode,opts:Object.assign({},DEFAULTS.opts[t.mode],t.opts),ziel:'Besser als dein bisheriger Schnitt in diesem Modus',warum:t.why})));
+  return plan.filter(d=>!MODES[d.mode].minPlayers).slice(0,5).map(d=>Object.assign(d,{done:false,result:''}));
+}
+function modeCatalog(){
+  return Object.entries(MODES).filter(([,m])=>!m.minPlayers).map(([k,m])=>`- ${k}: ${m.name}, ${m.desc}. Optionen: ${m.options.length?m.options.map(o=>`${o.key} = ${o.choices.map(c=>JSON.stringify(c[0])).join(' | ')}`).join('; '):'keine'}`).join('\n');
+}
+function errText(e){
+  const c=e&&e.code;
+  if(c==='not_granted') return 'Der Zugriff auf Claude wurde abgelehnt. Die Auswertung ohne KI steht weiter zur Verfügung.';
+  if(c==='rate_limited'||c==='queue_overflow') return 'Gerade zu viele Anfragen. Bitte einen Moment warten.';
+  if(c==='invalid_json'||c==='empty_completion') return 'Die Antwort war unvollständig. Bitte nochmal versuchen.';
+  if(c==='session_expired') return 'Die Sitzung ist abgelaufen. Bitte die Seite neu laden.';
+  return 'Das hat nicht geklappt. Bitte später nochmal versuchen.';
+}
+async function openCoach(){
+  app.innerHTML='<div class="wrap"><header class="gbar"><div class="gmode">Trainer</div><button class="ghost" data-act="back">Zurück</button></header><p class="muted">Trainer wird geladen …</p></div>';
+  window.scrollTo(0,0);
+  coach.recs=await loadRecords();
+  const s=await getSample();coach.ai=!!s;coach.imgOK=false;
+  if(s){try{const l=await s.limits();coach.imgOK=!!(l&&l.images);coach.imgMax=l&&l.images?l.images.maxCount:0;}catch(e){}}
+  if(onCoach()) renderCoach();
+}
+function renderCoach(){
+  const names=[...new Set([...coach.recs.flatMap(r=>(r.players||[]).filter(p=>!p.bot).map(p=>p.name)),...setup.players.filter(p=>!p.bot).map(p=>(p.name||'').trim()).filter(Boolean)])];
+  if(!names.includes(coach.player)) coach.player=names[0]||'Spieler 1';
+  const es=entriesFor(coach.recs,coach.player),an=analyze(coach.player,es),c=cd();
+  coach.data=an.data;coach.F=an.F;
+  const chips=names.length>1?`<div class="seg" role="group" aria-label="Spieler" style="margin-bottom:16px">${names.map(n=>`<button data-cplayer="${esc(n)}" class="${n===coach.player?'on':''}" aria-pressed="${n===coach.player}">${esc(n)}</button>`).join('')}</div>`:'';
+  const finds=!es.length?'<p class="empty">Noch keine Spiele gespeichert. Spiel ein paar Partien, am besten 501 und ein Training, dann hat der Trainer Daten zum Auswerten.</p>':
+    an.F.length?`<div class="finds">${an.F.map(f=>`<div class="find ${f.lvl}"><b>${esc(f.t)}</b><span>${esc(f.d)}</span></div>`).join('')}</div>`:'<p class="muted">Keine deutlichen Auffälligkeiten. Mit mehr Spielen, vor allem 501 und 100 Darts, werden die Befunde genauer.</p>';
+  let ana='';
+  if(coach.ai){
+    ana+=coach.busy==='analyse'?`<div class="coachbox"><p><b>Trainer analysiert deine Daten …</b></p><p class="muted">Das kann bis zu einer Minute dauern.</p><button class="ghost" data-act="coachstop">Abbrechen</button></div>`:
+      `<button class="primary start" data-act="coachai" ${es.length?'':'disabled'}>${c.analysis?'Neu analysieren':'Analyse anfordern'}</button>`;
+    if(c.analysis&&coach.busy!=='analyse'){
+      const A=c.analysis,li=a=>a.map(x=>`<li>${esc(x)}</li>`).join('');
+      ana+=`<div class="coachbox"><p>${fmtText(A.diagnose)}</p>${A.staerken.length?`<h3 class="cath">Stärken</h3><ul class="clist">${li(A.staerken)}</ul>`:''}${A.baustellen.length?`<h3 class="cath">Baustellen</h3><ul class="clist">${li(A.baustellen)}</ul>`:''}</div>
+      ${A.technik.length?`<h3 class="cath">Technik</h3><div class="tips">${A.technik.map(t=>`<div class="tip"><b>${esc(t.titel)}</b><p>${fmtText(t.text)}</p></div>`).join('')}</div>`:''}
+      <p class="muted small">Analyse vom ${new Date(A.ts).toLocaleDateString('de-DE')}. Der Trainer sieht nur deine Statistik, Technik-Hinweise sind wahrscheinliche Ursachen.</p>`;
+    }
+  }else{
+    const ids=an.F.filter(f=>TECH[f.id]).map(f=>f.id);
+    ana=`<div class="tips">${(ids.length?ids:['basis']).slice(0,3).map(id=>`<div class="tip"><b>${esc(TECH[id].titel)}</b><p>${esc(TECH[id].text)}</p></div>`).join('')}</div>
+    <p class="muted small">In der Pfeilerl-Version auf claude.ai wertet zusätzlich ein KI-Trainer deine Daten aus und beantwortet Fragen.</p>`;
+  }
+  if(coach.err) ana=`<p class="err" role="alert">${esc(coach.err)}</p>`+ana;
+  const plan=c.plan||[],nextI=plan.findIndex(d=>!d.done),allDone=plan.length&&nextI<0;
+  const planHTML=plan.length?`<ol class="drills">${plan.map((d,i)=>`<li class="drill ${d.done?'done':''}"><div><b>${i+1}. ${esc(MODES[d.mode].name)}</b><span class="muted">${esc(MODES[d.mode].sub(d.opts))}</span>${d.ziel?`<span>Ziel: ${esc(d.ziel)}</span>`:''}${d.warum?`<span class="muted">${esc(d.warum)}</span>`:''}${d.result?`<span class="res">Ergebnis: ${esc(d.result)}</span>`:''}</div><button class="${i===nextI?'primary':'ghost'} sm" data-drill="${i}">${d.done?'Nochmal':'Starten'}</button></li>`).join('')}</ol>`:
+    `<p class="muted">${coach.ai?'Fordere eine Analyse an, dann stellt dir der Trainer eine passende Einheit zusammen.':'Erstelle eine Einheit aus deinen Befunden.'}</p>`;
+  const fb=allDone&&coach.ai?(c.feedback||coach.fbBusy?`<div class="coachbox" id="coachfb">${c.feedback?fmtText(c.feedback):'Trainer schreibt …'}</div>`:`<button class="ghost" data-act="coachfb" style="width:100%">Feedback zur Einheit holen</button>`):'';
+  const tech=coach.imgOK?`<section><h2>Technik-Check</h2><p class="muted">Lass dich von der Seite filmen oder fotografieren, ganzer Körper im Bild, Wurfarm zur Kamera. Bei einem Video nimmt der Trainer ${Math.min(coach.imgMax||4,6)} Einzelbilder aus dem Wurf.</p>
+    <label class="ghost filebtn ${coach.techBusy?'off':''}">Foto oder Video wählen<input type="file" id="techfile" accept="image/*,video/*" hidden ${coach.techBusy?'disabled':''}></label>
+    ${c.tech||coach.techBusy?`<div class="coachbox" id="techout">${c.tech?fmtText(c.tech):'Trainer schaut sich die Bilder an …'}</div>`:''}</section>`:'';
+  const chat=coach.ai?`<section><h2>Frag den Trainer</h2>${c.chat.length?`<div class="chat">${c.chat.map((m,i)=>`<div class="bubble ${m.role}" ${i===c.chat.length-1?'id="lastbubble"':''}>${m.content?fmtText(m.content):'…'}</div>`).join('')}</div>`:'<p class="muted">Zum Beispiel: „Welches Double soll ich mir als Lieblings-Double nehmen?“ oder „Wie trainiere ich gegen die Nervosität bei Finishes?“</p>'}
+    <div class="joinrow"><input id="coachq" placeholder="Deine Frage" autocomplete="off" aria-label="Frage an den Trainer" ${coach.chatBusy?'disabled':''}><button class="primary" data-act="coachask" ${coach.chatBusy?'disabled':''}>Senden</button></div></section>`:'';
+  app.innerHTML=`<div class="wrap"><header class="gbar"><div class="gmode">Trainer</div><button class="ghost" data-act="back">Zurück</button></header>${chips}
+  <section><h2>Befunde für ${esc(coach.player)}</h2>${finds}</section>
+  <section><h2>Beratung</h2>${ana}</section>
+  <section><h2>Trainingseinheit</h2>${planHTML}<div class="addrow" style="margin-top:8px"><button class="ghost" data-act="coachlocal">${plan.length?'Schnellplan neu erstellen':'Schnellplan erstellen'}</button></div>${fb}</section>
+  ${tech}${chat}</div>`;
+}
+function buildCoachPrompt(){
+  return `Du bist ein erfahrener, freundlicher Darts-Trainer in der App „Pfeilerl“. Analysiere die Statistik von ${coach.player} und gib konkrete Beratung.
+Regeln:
+- Antworte auf Deutsch, per du, klar und konkret, ohne Floskeln.
+- Du siehst nur Zahlen, nicht die Wurftechnik. Formuliere Technik-Hinweise als wahrscheinliche Ursachen, die die Daten nahelegen, und sag, woran man es selbst prüfen kann.
+- Begründe Aussagen mit Werten aus den Daten. Fehlen Daten, sag, welche Spiele mehr Aussagekraft bringen.
+- Ziele sind messbar und realistisch, leicht über dem aktuellen Niveau.
+- Der Trainingsplan nutzt nur diese Übungen der App (Schlüssel und erlaubte Optionen):
+${modeCatalog()}
+
+Daten (JSON):
+${JSON.stringify(coach.data)}
+
+Vorläufige Befunde der App:
+${coach.F.map(f=>'- '+f.t+': '+f.d).join('\n')||'- keine'}
+
+Antworte ausschließlich mit JSON in genau dieser Form:
+{"diagnose":"2 bis 4 Sätze","staerken":["kurz"],"baustellen":["kurz"],"technik":[{"titel":"kurz","text":"2 bis 3 Sätze mit Prüf-Tipp"}],"plan":[{"mode":"schlüssel","opts":{},"ziel":"messbares Ziel","warum":"1 Satz"}]}
+staerken und baustellen je 1 bis 3 Einträge, technik 2 bis 3, plan 3 bis 5 Übungen in sinnvoller Reihenfolge, Aufwärmen zuerst.`;
+}
+async function coachAI(){
+  const s=await getSample();if(!s) return;
+  coach.busy='analyse';coach.err='';coach.ctl=new AbortController();renderCoach();
+  try{
+    const r=await s.json(buildCoachPrompt(),{signal:coach.ctl.signal,modelTier:'default'});
+    const arr=v=>(Array.isArray(v)?v:[]).map(String).slice(0,3),c=cd();
+    c.analysis={diagnose:String(r&&r.diagnose||''),staerken:arr(r&&r.staerken),baustellen:arr(r&&r.baustellen),technik:(Array.isArray(r&&r.technik)?r.technik:[]).slice(0,3).map(t=>({titel:String(t.titel||''),text:String(t.text||'')})),ts:Date.now()};
+    const plan=sanitizePlan(r&&r.plan);
+    if(plan.length){c.plan=plan;c.feedback='';}
+    saveCoach();
+  }catch(e){if(!e||e.code!=='cancelled') coach.err=errText(e);}
+  coach.busy='';coach.ctl=null;
+  if(onCoach()) renderCoach();
+}
+async function coachFeedback(){
+  const s=await getSample();if(!s) return;
+  const c=cd();coach.fbBusy=true;c.feedback='';renderCoach();
+  const prompt=`Du bist Darts-Trainer. ${coach.player} hat diese Trainingseinheit absolviert. Gib ein kurzes, ehrliches Feedback in 4 bis 6 Sätzen, per du, auf Deutsch, ohne Überschriften: Was lief gut, wo wurde das Ziel verfehlt, und was ist der Fokus für die nächste Einheit.
+
+Einheit:
+${JSON.stringify(c.plan.map(d=>({uebung:MODES[d.mode].name,regeln:MODES[d.mode].sub(d.opts),ziel:d.ziel,ergebnis:d.result||'nicht gespielt'})))}
+
+Aktuelle Kennzahlen:
+${JSON.stringify(coach.data)}`;
+  try{
+    await s(prompt,{cache:false,onText:({text})=>{c.feedback=text;const el=document.getElementById('coachfb');if(el) el.innerHTML=fmtText(text);}});
+    saveCoach();
+  }catch(e){c.feedback=e&&e.text?e.text:'';coach.err=e&&e.code!=='cancelled'?errText(e):'';}
+  coach.fbBusy=false;if(onCoach()) renderCoach();
+}
+async function coachAsk(){
+  const inp=document.getElementById('coachq'),q=(inp&&inp.value||'').trim();
+  if(!q||coach.chatBusy) return;
+  const s=await getSample();if(!s) return;
+  const c=cd();c.chat.push({role:'user',content:q});c.chat=c.chat.slice(-20);
+  const msgs=c.chat.slice(-10).map(m=>({role:m.role,content:m.content}));
+  while(msgs.length&&msgs[0].role!=='user') msgs.shift();
+  const ctx=`Du bist ein erfahrener Darts-Trainer in der App „Pfeilerl“ und berätst ${coach.player}. Antworte auf Deutsch, per du, konkret und kurz, höchstens 6 Sätze, ohne Überschriften. Du siehst nur die Statistik, nicht die Technik. Empfiehlst du eine Übung, nenne eine aus der App: ${Object.values(MODES).map(m=>m.name).join(', ')}.
+
+Statistik (JSON): ${JSON.stringify(coach.data)}
+Befunde: ${coach.F.map(f=>f.t).join('; ')||'keine'}
+${c.analysis?'Deine letzte Analyse: '+c.analysis.diagnose:''}
+
+Frage: `;
+  msgs[0]={role:'user',content:ctx+msgs[0].content};
+  c.chat.push({role:'assistant',content:''});coach.chatBusy=true;renderCoach();
+  const last=c.chat[c.chat.length-1];
+  try{
+    await s(msgs,{cache:false,onText:({text})=>{last.content=text;const el=document.getElementById('lastbubble');if(el) el.innerHTML=fmtText(text);}});
+  }catch(e){last.content=(e&&e.text)||errText(e);}
+  coach.chatBusy=false;saveCoach();
+  if(onCoach()){renderCoach();const el=document.getElementById('coachq');if(el) el.focus();}
+}
+function shrinkImg(file,max){
+  return new Promise((res,rej)=>{
+    const img=new Image();
+    img.onload=()=>{const k=Math.min(1,max/Math.max(img.width,img.height)),cv=document.createElement('canvas');cv.width=Math.round(img.width*k);cv.height=Math.round(img.height*k);cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);URL.revokeObjectURL(img.src);cv.toBlob(b=>b?res(b):rej(new Error('blob')),'image/jpeg',0.85);};
+    img.onerror=()=>rej(new Error('img'));img.src=URL.createObjectURL(file);
+  });
+}
+async function videoFrames(file,n){
+  const v=document.createElement('video');v.muted=true;v.playsInline=true;v.preload='auto';v.src=URL.createObjectURL(file);
+  await new Promise((r,j)=>{v.onloadeddata=r;v.onerror=j;});
+  const vw=v.videoWidth||960,vh=v.videoHeight||540,W=Math.min(960,vw),H=Math.round(W*vh/vw),cv=document.createElement('canvas');cv.width=W;cv.height=H;
+  const x=cv.getContext('2d'),out=[];
+  for(let i=0;i<n;i++){
+    const t=v.duration*(0.1+0.8*i/Math.max(1,n-1));
+    await new Promise(r=>{v.onseeked=r;v.currentTime=t;});
+    x.drawImage(v,0,0,W,H);
+    out.push(await new Promise(r=>cv.toBlob(r,'image/jpeg',0.82)));
+  }
+  URL.revokeObjectURL(v.src);
+  return out.filter(Boolean);
+}
+async function techCheck(file){
+  const s=await getSample();if(!s||!file) return;
+  const c=cd();coach.techBusy=true;c.tech='';renderCoach();
+  try{
+    const imgs=file.type.startsWith('video/')?await videoFrames(file,Math.min(coach.imgMax||4,6)):[await shrinkImg(file,1280)];
+    const multi=imgs.length>1;
+    const prompt=`Du bist ein erfahrener Darts-Trainer. ${multi?`Die ${imgs.length} Bilder sind Einzelbilder aus einem Video in zeitlicher Reihenfolge und zeigen`:'Das Bild zeigt'} ${coach.player} beim Dartwurf. Beurteile, soweit erkennbar: Stand und Fußstellung, Gewichtsverteilung, Oberkörper und Schulter, Ellbogen und Wurfarm, Griff, Abwurf und Follow-through. Nenne zuerst, was gut aussieht, dann die zwei bis drei wichtigsten Änderungen, jeweils mit einer konkreten Übung. Was auf den Bildern nicht erkennbar ist, sagst du ehrlich, statt zu raten.${coach.F.length?' Die Statistik zeigt außerdem: '+coach.F.map(f=>f.t+' ('+f.d+')').join(' '):''} Antworte auf Deutsch, per du, in kurzen Absätzen ohne Überschriften.`;
+    await s(prompt,{images:imgs,cache:false,onText:({text})=>{c.tech=text;const el=document.getElementById('techout');if(el) el.innerHTML=fmtText(text);}});
+  }catch(e){c.tech=e&&e.code==='image_rejected'?'Dieses Format wurde nicht angenommen. Bitte ein Foto als JPG oder PNG oder ein kürzeres Video wählen.':(e&&e.text)||(e&&e.code?errText(e):'Die Datei ließ sich nicht lesen. Bitte ein anderes Foto oder Video probieren.');}
+  coach.techBusy=false;saveCoach();
+  if(onCoach()) renderCoach();
+}
+function startDrill(i){
+  const d=cd().plan[i];if(!d) return;
+  startGame(false,{mode:d.mode,opts:clone(d.opts),players:[{name:coach.player,bot:0}],tour:null,drill:{i,player:coach.player}});
+  window.scrollTo(0,0);
+}
+function drillDone(g,undoIt){
+  if(!g.drill) return;
+  const c=coachData[g.drill.player],d=c&&c.plan[g.drill.i];if(!d) return;
+  if(undoIt){d.done=false;d.result='';}
+  else{const st=MODES[g.mode].stats(g)[0];d.done=true;d.result=st?st[1]:'';c.feedback='';}
+  saveCoach();
+}
+const toCoach=()=>endGame('coach');
+function coachClick(t){
+  const a=t.dataset.act;coach.err='';
+  if(a==='coach'){openCoach();return;}
+  if(t.dataset.cplayer!==undefined){coach.player=t.dataset.cplayer;renderCoach();return;}
+  if(a==='coachai'){coachAI();return;}
+  if(a==='coachstop'){if(coach.ctl) coach.ctl.abort();return;}
+  if(a==='coachlocal'){const c=cd();c.plan=localPlan(entriesFor(coach.recs,coach.player));c.feedback='';saveCoach();renderCoach();return;}
+  if(a==='coachfb'){coachFeedback();return;}
+  if(a==='coachask'){coachAsk();return;}
+  if(t.dataset.drill!==undefined) startDrill(+t.dataset.drill);
+}
+
 /* ---------- Ereignisse im Setup ---------- */
 app.addEventListener('click',e=>{
   if(game) return;
   if(e.target.id==='calcv'){calClick(e);return;}
   const t=e.target.closest('button');if(!t||t.disabled) return;
+  if(['coach','coachai','coachstop','coachlocal','coachfb','coachask'].includes(t.dataset.act)||t.dataset.drill!==undefined||t.dataset.cplayer!==undefined){coachClick(t);return;}
   if(['online','onlcreate','onljoin'].includes(t.dataset.act)||t.dataset.oseat!==undefined||t.dataset.ojseat!==undefined){onlClick(t);return;}
   if(['cam','camscan','camtoggle','calsnap','calundo','calcancel','camdiag','camref'].includes(t.dataset.act)||t.dataset.cs||t.dataset.cal!==undefined||t.dataset.sens!==undefined||t.dataset.thr!==undefined||t.dataset.mg!==undefined){camClick(t);return;}
   if(['tour','tourstart','tourend'].includes(t.dataset.act)||t.dataset.tf||t.dataset.play){tourClick(t);return;}
@@ -1872,7 +2155,11 @@ app.addEventListener('click',e=>{
   if(a==='start'){startGame(false);window.scrollTo(0,0);return;}
   if(a==='resume'){startGame(true);window.scrollTo(0,0);}
 });
-app.addEventListener('change',e=>{if(e.target.id==='smode'){sv.mode=e.target.value;sv.armed=null;drawStats();}});
+app.addEventListener('change',e=>{
+  if(e.target.id==='smode'){sv.mode=e.target.value;sv.armed=null;drawStats();}
+  if(e.target.id==='techfile'&&e.target.files&&e.target.files[0]) techCheck(e.target.files[0]);
+});
+app.addEventListener('keydown',e=>{if(e.target.id==='coachq'&&e.key==='Enter'){e.preventDefault();coachAsk();}});
 app.addEventListener('input',e=>{
   if(game||e.target.dataset.pi===undefined) return;
   setup.players[+e.target.dataset.pi].name=e.target.value;saveSetup();
