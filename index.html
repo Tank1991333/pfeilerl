@@ -191,7 +191,7 @@ table.cricket{width:100%;border-collapse:collapse;background:var(--surface);bord
 .pad.busy{opacity:.45;pointer-events:none}
 .botrow{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
 .botrow .botname{font-weight:600}
-.botrow .seg button{padding:5px 10px;font-size:14px}
+.botrow .seg button{padding:6px 12px;font-size:14px;min-height:44px}
 .addrow{display:flex;gap:8px;flex-wrap:wrap}
 .err{color:var(--red);font-weight:600;margin:0 0 10px}
 .heat{margin:8px 0 0;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px}
@@ -370,6 +370,48 @@ h2 .muted{font-family:'Barlow',system-ui,sans-serif;font-size:15px;font-weight:5
 .confetti i{position:absolute;top:-16px;width:9px;height:14px;border-radius:2px;animation:fall linear forwards}
 @keyframes fall{to{transform:translateY(110vh) rotate(760deg)}}
 @media (prefers-reduced-motion: reduce){.confetti{display:none}}
+/* Responsiv: Spielansicht passt ohne Scrollen auf Handy, Tablet und PC */
+.mod{min-height:44px;padding:10px 12px}
+#pad .key{height:clamp(44px,7.2vh,56px);height:clamp(44px,7.2dvh,56px)}
+#score.many .tiles{grid-template-columns:repeat(auto-fit,minmax(100px,1fr))}
+#score.many .tile{padding:6px 8px 6px 10px}
+#score.many .big{font-size:clamp(32px,9vw,46px)}
+#score.many .cricket td{height:26px}
+#score.many .cricket tbody th,#score.many .cricket tbody td{padding-top:1px;padding-bottom:1px;font-size:18px}
+#score.many~#pad .key{height:clamp(44px,6vh,52px);height:clamp(44px,6dvh,52px)}
+@media (orientation: landscape) and (min-width: 700px){
+  .wrap.game{max-width:1180px;display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,440px);grid-template-rows:auto auto auto auto 1fr;column-gap:20px;align-items:start;padding-bottom:12px}
+  .game .gbar{grid-column:1;grid-row:1}
+  .game #score{grid-column:1;grid-row:2}
+  .game .turn{grid-column:1;grid-row:3}
+  .game .camline{grid-column:1;grid-row:4}
+  .game #pad{grid-column:2;grid-row:1/6;margin:0}
+  .game .controls{grid-column:1;grid-row:5;position:static}
+  .game #ov{display:contents}
+  .game #score~#pad .key,.game #pad .mod{height:clamp(44px,calc((100vh - 72px)/6),68px);height:clamp(44px,calc((100dvh - 72px)/6),68px);padding-top:0;padding-bottom:0}
+}
+@media (max-height: 700px) and (orientation: portrait){
+  #score.many~#pad .key{height:44px}
+  .game .turn{margin:6px 0 4px;min-height:48px}
+}
+/* Handy quer: Aufnahme und Steuerung oben, Spielstand darunter scrollbar */
+@media (orientation: landscape) and (min-width: 700px) and (max-height: 560px){
+  .game .controls{grid-row:3}
+  .game .turn{grid-row:2;margin:4px 0 2px;min-height:44px}
+  .game #score{grid-row:4;margin-top:6px}
+  .game .camline{grid-row:5}
+  .game #pad{grid-row:1/7}
+  .wrap.game{grid-template-rows:auto auto auto auto auto 1fr}
+}
+/* Overlays bleiben auf niedrigen Bildschirmen scrollbar */
+.ov{overflow-y:auto;place-items:start center}
+.ovcard{margin:auto 0}
+/* Breite Bildschirme: Startseite nutzt mehr Platz */
+@media (min-width: 900px){
+  .wrap.setup{max-width:820px}
+  .wrap.setup .modes{grid-template-columns:repeat(3,1fr)}
+}
+
 </style>
 </head>
 <body>
@@ -1036,7 +1078,7 @@ function renderSetup(){
   const resume=saved&&saved.g&&!saved.g.winner&&MODES[saved.g.mode]?
     `<div class="resume"><span>Laufendes Spiel<small>${esc(MODES[saved.g.mode].name)} mit ${saved.g.players.map(p=>esc(p.name)).join(', ')}</small></span><button class="primary" data-act="resume">Fortsetzen</button></div>`:'';
   const seg=(attr,choices,cur,lab)=>`<div class="seg" role="group" aria-label="${lab}">${choices.map((c,i)=>`<button ${attr}="${i}" class="${cur===c[0]?'on':''}" aria-pressed="${cur===c[0]}">${c[1]}</button>`).join('')}</div>`;
-  app.innerHTML=`<div class="wrap">
+  app.innerHTML=`<div class="wrap setup">
   <header class="top"><div class="toprow"><h1 class="brand">${LOGO}Pfeilerl</h1></div><p>Dart zählen, ganz ohne Kopfrechnen</p><div class="tbtns"><button class="ghost" data-act="coach">Trainer</button><button class="ghost" data-act="tour">Turnier${tour?' läuft':''}</button><button class="ghost" data-act="online">Online</button><button class="ghost" data-act="tv">Bildschirm</button><button class="ghost" data-act="cam">Kamera${cam.active?' an':''}</button><button class="ghost" data-act="stats">Statistik</button></div></header>
   ${resume}
   <section><h2>Spielmodus</h2>${CATS.map(([c,cn])=>`<h3 class="cath c-${c}">${cn}</h3><div class="modes">${Object.entries(MODES).filter(([,x])=>x.cat===c).map(([k,x])=>
@@ -1215,7 +1257,7 @@ function endGame(toT){
 
 function update(){
   const m=MODES[game.mode],p=game.players[game.cur],bot=isBotTurn(),wait=!bot&&!canAct();
-  document.getElementById('score').innerHTML=m.board(game);
+  const sc=document.getElementById('score');sc.innerHTML=m.board(game);sc.classList.toggle('many',game.players.length>2);
   let h='';
   if(game.winner) h='<span class="who">Spiel vorbei</span>';
   else if(game.legDone) h=`<span class="who">${esc(game.msg)}</span><span class="co">Weiter startet das nächste Leg</span>`;
@@ -2491,8 +2533,10 @@ app.addEventListener('input',e=>{
   setup.players[+e.target.dataset.pi].name=e.target.value;saveSetup();
 });
 
+if(typeof window.__pfeilerlTest==='function') window.__pfeilerlTest({MODES,CATS,checkout,classify,fitCal,triangulate,startGame,throwDart,nextVisit,undo,getGame:()=>game,setup,loadRecords,onlClick,tvClick,profClick,coachClick,drawStats,sv,newAchievements,getOnl:()=>onl,getTv:()=>tv,els:null});
 renderSetup();
 })();
+
 </script>
 <script>
 if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
