@@ -403,6 +403,11 @@ h2 .muted{font-family:'Barlow',system-ui,sans-serif;font-size:15px;font-weight:5
   .game #pad{grid-row:1/7}
   .wrap.game{grid-template-rows:auto auto auto auto auto 1fr}
 }
+/* Tastatur-Hilfe nur mit Maus und Tastatur */
+.kbhelp{display:none;grid-column:1/-1;margin:2px 0 0;font-size:12px;color:var(--muted);text-align:center}
+.kbhelp kbd{font:inherit;font-weight:600;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 4px;background:var(--surface);color:var(--ink)}
+@media (hover: hover) and (pointer: fine){.kbhelp{display:block}}
+#pad .key.kbd{background:var(--violet);color:#fff;border-color:var(--violet)}
 /* Overlays bleiben auf niedrigen Bildschirmen scrollbar */
 .ov{overflow-y:auto;place-items:start center}
 .ovcard{margin:auto 0}
@@ -1122,7 +1127,7 @@ function startGame(fromSaved,cfg){
   <div class="turn"><div class="hint" id="hint" aria-live="polite"></div><div class="visit" id="visit"></div></div>
   <p class="camline" id="camstat"${cam.active?'':' hidden'}>${esc(cam.last||'Kamera aktiv')}</p>
   <div class="pad" id="pad"><div class="mods"><button id="mD" class="mod" aria-pressed="false">Double</button><button id="mT" class="mod" aria-pressed="false">Triple</button></div><div class="keys">${Array.from({length:20},(_,i)=>`<button class="key" data-n="${i+1}">${i+1}</button>`).join('')}<button class="key k25" data-n="25">25</button><button class="key kb" data-n="50">Bull</button></div></div>
-  <nav class="controls"><button class="sec" id="undo">Rückgängig</button><button class="sec" id="miss">Daneben</button><button class="primary" id="next">Weiter</button></nav>
+  <nav class="controls"><button class="sec" id="undo">Rückgängig</button><button class="sec" id="miss">Daneben</button><button class="primary" id="next">Weiter</button><p class="kbhelp">Tastatur: Zahl tippen, <kbd>D</kbd> Double, <kbd>T</kbd> Triple, <kbd>B</kbd> Bull, <kbd>0</kbd> Daneben, <kbd>Enter</kbd> Weiter, <kbd>⌫</kbd> Rückgängig</p></nav>
   <div id="ov"></div></div>`;
   document.getElementById('pad').addEventListener('click',e=>{
     const t=e.target.closest('button');if(!t||t.disabled) return;
@@ -1236,6 +1241,41 @@ function scheduleBot(){
     else throwDart(botThrow(game,game.players[game.cur]),true);
   },fin?1500:750);
 }
+
+/* Tastatur am PC: Zahl tippen (1, 2 und 5 warten kurz auf eine zweite Ziffer), D/T, B, 0, Enter, Rücktaste */
+let kbBuf='',kbTimer=null;
+const kbValid=n=>(n>=1&&n<=20)||n===25||n===50;
+function kbShow(){document.querySelectorAll('#pad .key').forEach(k=>k.classList.toggle('kbd',!!kbBuf&&k.dataset.n===kbBuf));}
+function kbThrow(n){
+  if(n===25&&mod===3){setMod(1);return;}
+  const d=n===50?{seg:25,mult:2}:n===25?{seg:25,mult:mod===2?2:1}:{seg:n,mult:mod};
+  setMod(1);throwDart(d);
+}
+function kbFlush(){clearTimeout(kbTimer);kbTimer=null;const n=+kbBuf;kbBuf='';kbShow();if(kbValid(n)) kbThrow(n);}
+function gameKey(e){
+  if(!game||game.winner){kbBuf='';return;}
+  const k=e.key,t=e.target||{};
+  if(e.altKey||e.metaKey||(e.ctrlKey&&k!=='z')) return;
+  if(['INPUT','TEXTAREA','SELECT'].includes(t.tagName)) return;
+  if((k==='Enter'||k===' ')&&t.closest&&t.closest('.gtools')) return;
+  if(/^[0-9]$/.test(k)){
+    if(!kbBuf&&k==='0') throwDart({seg:0,mult:0});
+    else{
+      kbBuf+=k;const n=+kbBuf;
+      const more=kbBuf.length<2&&Array.from({length:10},(_,i)=>n*10+i).some(kbValid);
+      if(more){clearTimeout(kbTimer);kbTimer=setTimeout(kbFlush,700);kbShow();} else kbFlush();
+    }
+  }
+  else if(k==='d'||k==='D') setMod(mod===2?1:2);
+  else if(k==='t'||k==='T') setMod(mod===3?1:3);
+  else if(k==='b'||k==='B') kbThrow(50);
+  else if(k==='Enter'||k===' '){if(kbBuf) kbFlush(); else nextVisit(false);}
+  else if(k==='Backspace'||k==='z'){if(kbBuf){clearTimeout(kbTimer);kbBuf='';kbShow();} else undo();}
+  else if(k==='Escape'){clearTimeout(kbTimer);kbBuf='';kbShow();setMod(1);}
+  else return;
+  e.preventDefault();
+}
+document.addEventListener('keydown',gameKey);
 
 function pulseNext(){const n=document.getElementById('next');if(!n) return;n.classList.remove('pulse');void n.offsetWidth;n.classList.add('pulse');}
 
@@ -2533,7 +2573,7 @@ app.addEventListener('input',e=>{
   setup.players[+e.target.dataset.pi].name=e.target.value;saveSetup();
 });
 
-if(typeof window.__pfeilerlTest==='function') window.__pfeilerlTest({MODES,CATS,checkout,classify,fitCal,triangulate,startGame,throwDart,nextVisit,undo,getGame:()=>game,setup,loadRecords,onlClick,tvClick,profClick,coachClick,drawStats,sv,newAchievements,getOnl:()=>onl,getTv:()=>tv,els:null});
+if(typeof window.__pfeilerlTest==='function') window.__pfeilerlTest({MODES,CATS,checkout,classify,fitCal,triangulate,startGame,throwDart,nextVisit,undo,getGame:()=>game,setup,loadRecords,onlClick,tvClick,profClick,coachClick,drawStats,sv,newAchievements,gameKey,getOnl:()=>onl,getTv:()=>tv,els:null});
 renderSetup();
 })();
 
