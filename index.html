@@ -408,6 +408,7 @@ h2 .muted{font-family:'Barlow',system-ui,sans-serif;font-size:15px;font-weight:5
 .kbhelp kbd{font:inherit;font-weight:600;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 4px;background:var(--surface);color:var(--ink)}
 @media (hover: hover) and (pointer: fine){.kbhelp{display:block}}
 #pad .key.kbd{background:var(--violet);color:#fff;border-color:var(--violet)}
+.ver{margin:14px 0 0;text-align:center;font-size:13px;color:var(--muted)}
 /* Overlays bleiben auf niedrigen Bildschirmen scrollbar */
 .ov{overflow-y:auto;place-items:start center}
 .ovcard{margin:auto 0}
@@ -424,6 +425,8 @@ h2 .muted{font-family:'Barlow',system-ui,sans-serif;font-size:15px;font-weight:5
 <script>
 (function(){
 'use strict';
+// Wird von scripts/build.mjs durch die Version aus package.json ersetzt
+const VERSION='1.2.0'.startsWith('__')?'Entwicklung':'1.2.0';
 const SEGS=[20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
 const store={
   get(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}},
@@ -1100,6 +1103,7 @@ function renderSetup(){
   <div class="setrow"><input id="setname" placeholder="Name, z. B. Blaue 22er" maxlength="24" aria-label="Name des Sets"><input id="setw" inputmode="decimal" placeholder="Gramm" maxlength="5" aria-label="Gewicht in Gramm"><button class="ghost" data-act="addset">Anlegen</button></div></section>
   ${setupErr?`<p class="err" role="alert">${esc(setupErr)}</p>`:''}
   <button class="primary start" data-act="start">Spiel starten</button>
+  <p class="ver">Pfeilerl Version ${VERSION}</p>
   </div>`;
 }
 const botName=lv=>'CPU '+BOTS[lv].n;
@@ -2573,7 +2577,7 @@ app.addEventListener('input',e=>{
   setup.players[+e.target.dataset.pi].name=e.target.value;saveSetup();
 });
 
-if(typeof window.__pfeilerlTest==='function') window.__pfeilerlTest({MODES,CATS,checkout,classify,fitCal,triangulate,startGame,throwDart,nextVisit,undo,getGame:()=>game,setup,loadRecords,onlClick,tvClick,profClick,coachClick,drawStats,sv,newAchievements,gameKey,getOnl:()=>onl,getTv:()=>tv,els:null});
+if(typeof window.__pfeilerlTest==='function') window.__pfeilerlTest({MODES,CATS,checkout,classify,fitCal,triangulate,startGame,throwDart,nextVisit,undo,getGame:()=>game,setup,loadRecords,onlClick,tvClick,profClick,coachClick,drawStats,sv,newAchievements,gameKey,VERSION,getOnl:()=>onl,getTv:()=>tv,els:null});
 renderSetup();
 })();
 
