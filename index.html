@@ -409,6 +409,21 @@ h2 .muted{font-family:'Barlow',system-ui,sans-serif;font-size:15px;font-weight:5
 @media (hover: hover) and (pointer: fine){.kbhelp{display:block}}
 #pad .key.kbd{background:var(--violet);color:#fff;border-color:var(--violet)}
 .ver{margin:14px 0 0;text-align:center;font-size:13px;color:var(--muted)}
+/* Startseite: Modi, Stammspieler, Einstellungen */
+.ghost.more{width:100%;margin-top:8px;font-weight:600;min-height:44px}
+.regs{margin:0 0 10px}
+.addrow .filebtn{margin-bottom:0;display:inline-flex;align-items:center}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{background:var(--surface);border:1px solid var(--violet);color:var(--violet);border-radius:999px;padding:8px 14px;min-height:44px;font-weight:600}
+.chip::before{content:"+ "}
+details.more{margin:22px 0 0;border-top:1px solid var(--line);padding-top:6px}
+details.more>summary{cursor:pointer;font-weight:600;color:var(--muted);padding:12px 0;min-height:44px;list-style-position:inside}
+details.more[open]>summary{margin-bottom:10px}
+.okmsg{background:color-mix(in srgb,var(--green) 14%,var(--surface));border:1px solid var(--green);border-radius:10px;padding:10px 12px;margin:10px 0 0}
+.upd{position:fixed;left:50%;transform:translateX(-50%);top:calc(env(safe-area-inset-top,0px) + 10px);z-index:50;width:calc(100% - 24px);max-width:480px;display:flex;align-items:center;gap:10px;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-left:5px solid var(--violet);border-radius:12px;padding:8px 8px 8px 12px;box-shadow:0 10px 30px -10px rgba(0,0,0,.35)}
+.upd span{flex:1;min-width:0;display:flex;flex-direction:column;font-size:15px}
+.upd small{color:var(--muted);font-size:13px}
+.upd .primary.sm{min-height:44px}
 /* Overlays bleiben auf niedrigen Bildschirmen scrollbar */
 .ov{overflow-y:auto;place-items:start center}
 .ovcard{margin:auto 0}
@@ -426,7 +441,7 @@ h2 .muted{font-family:'Barlow',system-ui,sans-serif;font-size:15px;font-weight:5
 (function(){
 'use strict';
 // Wird von scripts/build.mjs durch die Version aus package.json ersetzt
-const VERSION='1.2.0'.startsWith('__')?'Entwicklung':'1.2.0';
+const VERSION='1.3.0'.startsWith('__')?'Entwicklung':'1.3.0';
 const SEGS=[20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
 const store={
   get(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}},
@@ -1043,7 +1058,10 @@ setup.players=setup.players.map(x=>typeof x==='string'?{name:x}:x);
 if(typeof setup.voice!=='boolean') setup.voice=false;
 if(typeof setup.walkon!=='boolean') setup.walkon=false;
 if(!Array.isArray(setup.sets)) setup.sets=[];
-let setupProf=-1;
+if(!Array.isArray(setup.regulars)) setup.regulars=[];
+if(!Array.isArray(setup.recent)) setup.recent=[];
+if(!['auto','light','dark'].includes(setup.theme)) setup.theme='auto';
+let setupProf=-1,setupAll=false,setupMore=false,setupMsg='';
 
 let saved=store.get('dart.game');
 let game=null,history=[],quitArmed=false,wakeLock=null,mod=1,botTimer=null,setupErr='';
@@ -1086,25 +1104,100 @@ function renderSetup(){
   const resume=saved&&saved.g&&!saved.g.winner&&MODES[saved.g.mode]?
     `<div class="resume"><span>Laufendes Spiel<small>${esc(MODES[saved.g.mode].name)} mit ${saved.g.players.map(p=>esc(p.name)).join(', ')}</small></span><button class="primary" data-act="resume">Fortsetzen</button></div>`:'';
   const seg=(attr,choices,cur,lab)=>`<div class="seg" role="group" aria-label="${lab}">${choices.map((c,i)=>`<button ${attr}="${i}" class="${cur===c[0]?'on':''}" aria-pressed="${cur===c[0]}">${c[1]}</button>`).join('')}</div>`;
+  const modeBtn=([k,x])=>`<button class="mode cat-${x.cat} ${k===setup.mode?'on':''}" data-mode="${k}" aria-pressed="${k===setup.mode}"><span class="mname">${x.name}</span><span class="mdesc">${x.desc}</span></button>`;
+  const nModes=Object.keys(MODES).length;
+  const modes=setupAll?
+    CATS.map(([c,cn])=>`<h3 class="cath c-${c}">${cn}</h3><div class="modes">${Object.entries(MODES).filter(([,x])=>x.cat===c).map(modeBtn).join('')}</div>`).join('')+`<button class="ghost more" data-act="modesless" aria-expanded="true">Weniger zeigen</button>`:
+    `<h3 class="cath">${setup.recent.length?'Zuletzt gespielt':'Beliebt'}</h3><div class="modes">${quickModes().map(k=>modeBtn([k,MODES[k]])).join('')}</div><button class="ghost more" data-act="modesall" aria-expanded="false">Alle ${nModes} Spielmodi zeigen</button>`;
+  const inGame=new Set(setup.players.map(p=>(p.name||'').trim()));
+  const regs=setup.regulars.filter(r=>!inGame.has(r.name));
   app.innerHTML=`<div class="wrap setup">
   <header class="top"><div class="toprow"><h1 class="brand">${LOGO}Pfeilerl</h1></div><p>Dart zählen, ganz ohne Kopfrechnen</p><div class="tbtns"><button class="ghost" data-act="coach">Trainer</button><button class="ghost" data-act="tour">Turnier${tour?' läuft':''}</button><button class="ghost" data-act="online">Online</button><button class="ghost" data-act="tv">Bildschirm</button><button class="ghost" data-act="cam">Kamera${cam.active?' an':''}</button><button class="ghost" data-act="stats">Statistik</button></div></header>
   ${resume}
-  <section><h2>Spielmodus</h2>${CATS.map(([c,cn])=>`<h3 class="cath c-${c}">${cn}</h3><div class="modes">${Object.entries(MODES).filter(([,x])=>x.cat===c).map(([k,x])=>
-    `<button class="mode cat-${x.cat} ${k===setup.mode?'on':''}" data-mode="${k}" aria-pressed="${k===setup.mode}"><span class="mname">${x.name}</span><span class="mdesc">${x.desc}</span></button>`).join('')}</div>`).join('')}</section>
-  <section><h2>Regeln</h2>${m.options.map(op=>`<div class="opt"><span class="olabel">${op.label}</span>${
+  <section><h2>Spielmodus</h2>${modes}</section>
+  <section><h2>Regeln${setupAll?'':` <span class="muted">${esc(m.name)}</span>`}</h2>${m.options.map(op=>`<div class="opt"><span class="olabel">${op.label}</span>${
     `<div class="seg" role="group" aria-label="${op.label}">${op.choices.map((c,i)=>`<button data-opt="${op.key}" data-ci="${i}" class="${o[op.key]===c[0]?'on':''}" aria-pressed="${o[op.key]===c[0]}">${c[1]}</button>`).join('')}</div>`}</div>`).join('')}
   <div class="opt"><span class="olabel">Ansage per Sprache</span>${seg('data-voice',[[false,'Aus'],[true,'An']],setup.voice,'Ansage')}</div>
   <div class="opt"><span class="olabel">Einlauf mit Musik vor dem Spiel</span>${seg('data-walk',[[false,'Aus'],[true,'An']],setup.walkon,'Einlauf')}</div></section>
   <section><h2>Spieler</h2><ol class="players">${setup.players.map((pl,i)=>pl.bot?
     `<li><span class="num">${i+1}</span><div class="botrow"><span class="botname">${esc(pl.name)}</span><div class="seg" role="group" aria-label="Stärke">${Object.entries(BOTS).map(([k,b])=>`<button data-bl="${i}" data-lv="${k}" class="${pl.bot===+k?'on':''}" aria-pressed="${pl.bot===+k}">${b.n}</button>`).join('')}</div></div><button class="icon" data-rm="${i}" ${setup.players.length<2?'disabled':''} aria-label="Computer entfernen">✕</button></li>`:
     `<li><span class="num">${i+1}</span><div class="pcol"><input data-pi="${i}" value="${esc(pl.name)}" maxlength="16" aria-label="Name Spieler ${i+1}">${pl.nick||pl.set||pl.jingle?`<span class="psum">${[pl.nick?'„'+esc(pl.nick)+'“':'',pl.set?esc(setLabel(pl.set)):'',pl.jingle?esc(pl.jingle==='file'?'Eigene Musik':(JINGLES[pl.jingle]||JINGLES.fanfare).n):''].filter(Boolean).join(', ')}</span>`:''}</div><button class="icon ${setupProf===i?'on':''}" data-prof="${i}" aria-label="Profil von Spieler ${i+1}" aria-expanded="${setupProf===i}">⚙</button><button class="icon" data-rm="${i}" ${setup.players.length<2?'disabled':''} aria-label="Spieler ${i+1} entfernen">✕</button></li>${setupProf===i?profPanel(pl,i):''}`).join('')}</ol>
+  ${regs.length&&setup.players.length<8?`<div class="regs"><span class="olabel">Stammspieler antippen zum Hinzufügen</span><div class="chips">${regs.map(r=>`<button class="chip" data-reg="${esc(r.name)}">${esc(r.name)}</button>`).join('')}</div></div>`:''}
   ${setup.players.length<8?'<div class="addrow"><button class="ghost" data-act="add">Spieler hinzufügen</button><button class="ghost" data-act="addbot">Computer hinzufügen</button></div>':''}</section>
-  <section><h2>Dart-Sets</h2>${setup.sets.length?`<ul class="sets">${setup.sets.map(st=>`<li><span>${esc(setLabelS(st))}</span><button class="icon" data-delset="${st.id}" aria-label="Set ${esc(st.name)} löschen">✕</button></li>`).join('')}</ul>`:'<p class="muted">Lege deine Pfeile an und wähle sie im Spielerprofil (⚙). Die Statistik vergleicht dann, mit welchem Set du besser triffst.</p>'}
-  <div class="setrow"><input id="setname" placeholder="Name, z. B. Blaue 22er" maxlength="24" aria-label="Name des Sets"><input id="setw" inputmode="decimal" placeholder="Gramm" maxlength="5" aria-label="Gewicht in Gramm"><button class="ghost" data-act="addset">Anlegen</button></div></section>
   ${setupErr?`<p class="err" role="alert">${esc(setupErr)}</p>`:''}
   <button class="primary start" data-act="start">Spiel starten</button>
+  <details class="more" id="more" ${setupMore?'open':''}><summary>Einstellungen, Dart-Sets und Datensicherung</summary>
+  <section><h2>Design</h2>${seg('data-theme',[['auto','Wie Gerät'],['light','Hell'],['dark','Dunkel']],setup.theme,'Design')}</section>
+  <section><h2>Dart-Sets</h2>${setup.sets.length?`<ul class="sets">${setup.sets.map(st=>`<li><span>${esc(setLabelS(st))}</span><button class="icon" data-delset="${st.id}" aria-label="Set ${esc(st.name)} löschen">✕</button></li>`).join('')}</ul>`:'<p class="muted">Lege deine Pfeile an und wähle sie im Spielerprofil (⚙). Die Statistik vergleicht dann, mit welchem Set du besser triffst.</p>'}
+  <div class="setrow"><input id="setname" placeholder="Name, z. B. Blaue 22er" maxlength="24" aria-label="Name des Sets"><input id="setw" inputmode="decimal" placeholder="Gramm" maxlength="5" aria-label="Gewicht in Gramm"><button class="ghost" data-act="addset">Anlegen</button></div></section>
+  <section><h2>Stammspieler</h2>${setup.regulars.length?`<ul class="sets">${setup.regulars.map(r=>`<li><span>${esc(r.name)}</span><button class="icon" data-delreg="${esc(r.name)}" aria-label="${esc(r.name)} aus den Stammspielern entfernen">✕</button></li>`).join('')}</ul>`:'<p class="muted">Wer mitspielt, landet automatisch hier. Danach reicht ein Tipp auf den Namen, Spitzname, Dart-Set und Einlauf kommen mit.</p>'}</section>
+  <section><h2>Datensicherung</h2><p class="muted">Sichere Statistik, Stammspieler und Dart-Sets als Datei, etwa vor einem Handywechsel. Beim Wiederherstellen kommen nur fehlende Spiele dazu, nichts wird überschrieben.</p>
+  <div class="addrow"><button class="ghost" data-act="backup">Sicherung speichern</button><label class="ghost filebtn">Sicherung einspielen<input type="file" accept=".json,application/json" id="restore" hidden></label></div>${setupMsg?`<p class="okmsg" role="status">${esc(setupMsg)}</p>`:''}</section>
+  </details>
   <p class="ver">Pfeilerl Version ${VERSION}</p>
   </div>`;
+  setupMsg='';
+}
+function quickModes(){
+  const ks=setup.recent.filter(k=>MODES[k]);
+  for(const k of ['x01','cricket','atc','killer']) if(ks.length<4&&!ks.includes(k)) ks.push(k);
+  const q=ks.slice(0,4);
+  if(!q.includes(setup.mode)) q[q.length-1]=setup.mode;
+  return q;
+}
+function applyTheme(){
+  const r=document.documentElement;if(!r||!r.dataset) return;
+  if(setup.theme==='auto') delete r.dataset.theme; else r.dataset.theme=setup.theme;
+}
+/* Stammspieler: wer mitspielt, wird gemerkt (neueste zuerst, höchstens 30) */
+const isDefaultName=n=>!n||/^Spieler \d+$/.test(n.trim());
+function rememberPlayers(){
+  const keep=['nick','set','jingle','aid'];
+  setup.players.slice().reverse().forEach(pl=>{
+    const n=(pl.name||'').trim();if(pl.bot||isDefaultName(n)) return;
+    const r={name:n};keep.forEach(k=>{if(pl[k]) r[k]=pl[k];});
+    setup.regulars=[r,...setup.regulars.filter(x=>x.name!==n)];
+  });
+  setup.regulars=setup.regulars.slice(0,30);
+}
+function addRegular(name){
+  const r=setup.regulars.find(x=>x.name===name);if(!r||setup.players.length>=8&&!setup.players.some(p=>!p.bot&&isDefaultName(p.name))) return;
+  const i=setup.players.findIndex(p=>!p.bot&&isDefaultName(p.name));
+  if(i>=0) setup.players[i]=clone(r); else setup.players.push(clone(r));
+}
+/* Datensicherung als JSON-Datei */
+const nGames=n=>n===1?'1 Spiel':n+' Spiele';
+async function backupData(){
+  const data={app:'pfeilerl',format:1,version:VERSION,ts:Date.now(),records:await loadRecords(),sets:setup.sets,regulars:setup.regulars,coach:store.get('dart.coach')};
+  const day=new Date().toISOString().slice(0,10);
+  try{
+    const blob=new Blob([JSON.stringify(data)],{type:'application/json'});
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`pfeilerl-sicherung-${day}.json`;
+    document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+    setupMsg=`Sicherung mit ${nGames(data.records.length)} gespeichert.`;setupErr='';setupMore=true;
+  }catch(e){setupErr='Die Sicherung ließ sich hier nicht speichern. Öffne Pfeilerl im Browser und versuch es dort.';}
+  renderSetup();
+}
+function mergeBackup(data){
+  if(!data||data.app!=='pfeilerl'||!Array.isArray(data.records)) throw new Error('keine Sicherung');
+  const have=new Set(localRecs().map(r=>r.id));
+  const add=data.records.filter(r=>r&&r.id&&!have.has(r.id)&&MODES[r.mode]&&Array.isArray(r.players)).map(r=>Object.assign({},r,{pending:true}));
+  const all=localRecs().concat(add).sort((x,y)=>x.ts-y.ts);
+  store.set('dart.records',all.slice(-1000));
+  let sets=0,regs=0;
+  (Array.isArray(data.sets)?data.sets:[]).forEach(st=>{if(st&&st.id&&st.name&&!setup.sets.some(x=>x.id===st.id)){setup.sets.push(st);sets++;}});
+  (Array.isArray(data.regulars)?data.regulars:[]).forEach(r=>{if(r&&r.name&&!setup.regulars.some(x=>x.name===r.name)){setup.regulars.push(r);regs++;}});
+  if(data.coach&&!store.get('dart.coach')) store.set('dart.coach',data.coach);
+  saveSetup();
+  return {games:add.length,sets,regs};
+}
+async function restoreFile(file){
+  try{
+    const n=mergeBackup(JSON.parse(await file.text()));
+    setupMsg=n.games+n.regs+n.sets?`Wiederhergestellt: ${nGames(n.games)}, ${n.regs} Stammspieler, ${n.sets} Dart-Sets.`:'Alles aus dieser Sicherung ist schon da.';setupErr='';
+    loadRecords();
+  }catch(e){setupErr='Diese Datei ist keine Pfeilerl-Sicherung.';setupMsg='';}
+  setupMore=true;renderSetup();
 }
 const botName=lv=>'CPU '+BOTS[lv].n;
 const LOGO='<svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="23" fill="#1F201D"/><circle cx="24" cy="24" r="18" fill="#EDE2C4"/><circle cx="24" cy="24" r="12.5" fill="#1F201D"/><circle cx="24" cy="24" r="6.5" fill="#1B7546"/><circle cx="24" cy="24" r="3" fill="#C4262C"/><path d="M25 23L44 4" stroke="#C4262C" stroke-width="2.6" stroke-linecap="round"/><path d="M40 3l5 0 0 5M37 6l5 0 0 5" fill="none" stroke="#C4262C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -1122,6 +1215,7 @@ function startGame(fromSaved,cfg){
     if(!cfg&&m.minPlayers&&setup.players.length<m.minPlayers){setupErr=`${m.name} braucht mindestens ${m.minPlayers} Spieler. Füge einen Mitspieler oder Computer hinzu.`;renderSetup();return;}
     game={gid:newId(),tour:cfg?cfg.tour||null:null,drill:cfg&&cfg.drill?cfg.drill:null,mode,opts:clone(cfg?cfg.opts:setup.opts[mode]),players:cfg?clone(cfg.players):setup.players.map((pl,i)=>({name:(pl.name||'').trim()||'Spieler '+(i+1),bot:pl.bot||0,nick:pl.nick||'',jingle:pl.jingle||(pl.bot?'robot':'fanfare'),aid:pl.aid||'',set:pl.set?setLabel(pl.set):''})),cur:0,round:1,visit:[],locked:false,bust:false,winner:null,msg:''};
     m.init(game);history=[];saveGame();
+    if(!cfg){setup.recent=[mode,...setup.recent.filter(k=>k!==mode)].slice(0,4);rememberPlayers();setupMsg='';saveSetup();}
   }
   setupErr='';quitArmed=false;
   const m=MODES[game.mode];
@@ -2553,6 +2647,9 @@ app.addEventListener('click',e=>{
   if(['tour','tourstart','tourend'].includes(t.dataset.act)||t.dataset.tf||t.dataset.play){tourClick(t);return;}
   if(t.dataset.act==='stats'||t.dataset.act==='back'||t.dataset.smode||t.dataset.splayer!==undefined||t.dataset.del||t.dataset.train!==undefined){statsClick(t);return;}
   if(t.dataset.mode){setup.mode=t.dataset.mode;setupErr='';saveSetup();renderSetup();return;}
+  if(t.dataset.theme!==undefined){setup.theme=['auto','light','dark'][+t.dataset.theme];saveSetup();applyTheme();renderSetup();return;}
+  if(t.dataset.reg!==undefined){addRegular(t.dataset.reg);setupErr='';saveSetup();renderSetup();return;}
+  if(t.dataset.delreg!==undefined){setup.regulars=setup.regulars.filter(r=>r.name!==t.dataset.delreg);saveSetup();renderSetup();return;}
   if(t.dataset.opt){const op=MODES[setup.mode].options.find(o=>o.key===t.dataset.opt);setup.opts[setup.mode][op.key]=op.choices[+t.dataset.ci][0];saveSetup();renderSetup();return;}
   if(t.dataset.voice!==undefined){setup.voice=t.dataset.voice==='1';saveSetup();renderSetup();if(setup.voice) say('Ansage an');return;}
   if(t.dataset.bl!==undefined){const pl=setup.players[+t.dataset.bl];pl.bot=+t.dataset.lv;pl.name=botName(pl.bot);saveSetup();renderSetup();return;}
@@ -2561,15 +2658,19 @@ app.addEventListener('click',e=>{
   if(a==='add'){setup.players.push({name:'Spieler '+(setup.players.length+1)});setupErr='';saveSetup();renderSetup();
     const ins=app.querySelectorAll('.players input');const last=ins[ins.length-1];if(last){last.focus();last.select();}return;}
   if(a==='addbot'){setup.players.push({name:botName(2),bot:2});setupErr='';saveSetup();renderSetup();return;}
+  if(a==='modesall'||a==='modesless'){setupAll=a==='modesall';renderSetup();return;}
+  if(a==='backup'){backupData();return;}
   if(a==='start'){startGame(false);window.scrollTo(0,0);return;}
   if(a==='resume'){startGame(true);window.scrollTo(0,0);}
 });
 app.addEventListener('change',e=>{
   if(e.target.id==='smode'){sv.mode=e.target.value;sv.armed=null;drawStats();}
   if(e.target.id==='techfile'&&e.target.files&&e.target.files[0]) techCheck(e.target.files[0]);
+  if(e.target.id==='restore'&&e.target.files&&e.target.files[0]) restoreFile(e.target.files[0]);
   if(e.target.dataset.pset!==undefined){setup.players[+e.target.dataset.pset].set=e.target.value||'';saveSetup();}
   if(e.target.dataset.pf!==undefined&&e.target.files&&e.target.files[0]) profFile(+e.target.dataset.pf,e.target.files[0]);
 });
+app.addEventListener('toggle',e=>{if(e.target.id==='more') setupMore=e.target.open;},true);
 app.addEventListener('keydown',e=>{if(e.target.id==='coachq'&&e.key==='Enter'){e.preventDefault();coachAsk();}});
 app.addEventListener('input',e=>{
   if(!game&&e.target.dataset.nick!==undefined){setup.players[+e.target.dataset.nick].nick=e.target.value;saveSetup();return;}
@@ -2577,13 +2678,32 @@ app.addEventListener('input',e=>{
   setup.players[+e.target.dataset.pi].name=e.target.value;saveSetup();
 });
 
-if(typeof window.__pfeilerlTest==='function') window.__pfeilerlTest({MODES,CATS,checkout,classify,fitCal,triangulate,startGame,throwDart,nextVisit,undo,getGame:()=>game,setup,loadRecords,onlClick,tvClick,profClick,coachClick,drawStats,sv,newAchievements,gameKey,VERSION,getOnl:()=>onl,getTv:()=>tv,els:null});
+/* ---------- Update-Hinweis ---------- */
+window.pfeilerlUpdate=()=>{
+  if(document.getElementById('upd')) return;
+  const d=document.createElement('div');d.id='upd';d.className='upd';d.setAttribute('role','status');
+  d.innerHTML=`<span><b>Neue Version von Pfeilerl</b><small>${game?'Dein laufendes Spiel bleibt erhalten.':'Kurz neu laden, dann ist sie aktiv.'}</small></span><button class="primary sm" id="updgo">Aktualisieren</button><button class="icon" id="updx" aria-label="Später">✕</button>`;
+  document.body.appendChild(d);
+  document.getElementById('updgo').onclick=()=>location.reload();
+  document.getElementById('updx').onclick=()=>d.remove();
+};
+
+if(typeof window.__pfeilerlTest==='function') window.__pfeilerlTest({MODES,CATS,checkout,classify,fitCal,triangulate,startGame,throwDart,nextVisit,undo,getGame:()=>game,setup,loadRecords,onlClick,tvClick,profClick,coachClick,drawStats,sv,newAchievements,gameKey,VERSION,mergeBackup,quickModes,rememberPlayers,addRegular,localRecs,getOnl:()=>onl,getTv:()=>tv,els:null});
+applyTheme();
 renderSetup();
 })();
 
 </script>
 <script>
-if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
+if('serviceWorker' in navigator){window.addEventListener('load',()=>{
+  const had=!!navigator.serviceWorker.controller;let shown=false;
+  navigator.serviceWorker.addEventListener('controllerchange',()=>{if(had&&!shown){shown=true;if(window.pfeilerlUpdate) window.pfeilerlUpdate();}});
+  navigator.serviceWorker.register('sw.js').then(reg=>{
+    const check=()=>reg.update().catch(()=>{});
+    document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible') check();});
+    setInterval(check,30*60*1000);
+  }).catch(()=>{});
+});}
 </script>
 </body>
 </html>
