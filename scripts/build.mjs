@@ -1,8 +1,9 @@
 // Baut aus src/ zwei Varianten:
 //  index.html + sw.js im Hauptordner – installierbare PWA (GitHub Pages, Branch main, Ordner / (root))
+//  public/                            – dieselbe Seite samt Manifest und Icons für Vercel (vercel.json)
 //  dist/claude-artifact.html          – Einzeldatei für claude.ai (KI-Trainer, Online, Bildschirm)
 // Manifest und Icons liegen direkt im Hauptordner und werden nicht verändert.
-import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
+import {readFileSync,writeFileSync,mkdirSync,copyFileSync,rmSync} from 'node:fs';
 const {version}=JSON.parse(readFileSync('package.json','utf8'));
 const tpl=readFileSync('src/index.html','utf8');
 const css=readFileSync('src/styles.css','utf8');
@@ -28,6 +29,8 @@ if('serviceWorker' in navigator){window.addEventListener('load',()=>{
 </script>`;
 writeFileSync('index.html',base.replace('</title>','</title>\n'+pwaHead).replace('<!--PWA-->',pwaBody));
 writeFileSync('sw.js',readFileSync('src/sw.js','utf8').replaceAll('__VERSION__',version));
+rmSync('public',{recursive:true,force:true});mkdirSync('public');
+for(const f of ['index.html','sw.js','manifest.webmanifest','icon-192.png','icon-512.png','icon-maskable.png','apple-touch-icon.png']) copyFileSync(f,'public/'+f);
 mkdirSync('dist',{recursive:true});
 writeFileSync('dist/claude-artifact.html',base.replace('<!--PWA-->',''));
-console.log(`Gebaut: Version ${version}, index.html und sw.js (PWA) sowie dist/claude-artifact.html`);
+console.log(`Gebaut: Version ${version}, index.html und sw.js (PWA), public/ (Vercel) sowie dist/claude-artifact.html`);

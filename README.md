@@ -46,4 +46,4 @@ npm run serve     # http://localhost:8080
 
 1. In `package.json` die Versionsnummer erhöhen (Korrektur 1.3.0 → 1.3.1, neue Funktion → 1.4.0).
 2. `npm test` und `npm run build` ausführen, alles committen und nach `main` pushen.
-3. GitHub prüft jeden Push automatisch (Reiter „Actions“). Installierte Apps zeigen beim nächsten Öffnen „Neue Version von Pfeilerl“ mit einem Knopf zum Aktualisieren.
+3. Vercel baut und veröffentlicht jeden Push auf `main` automatisch unter https://pfeilerl.vercel.app (Einstellungen in `vercel.json`). GitHub prüft zusätzlich jeden Push (Reiter „Actions“). Installierte Apps zeigen beim nächsten Öffnen „Neue Version von Pfeilerl“ mit einem Knopf zum Aktualisieren.

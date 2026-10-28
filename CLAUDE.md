@@ -5,7 +5,7 @@ Pfeilerl ist ein Dart-Zähler als Web-App ohne Framework: eine HTML-Seite, eine 
 ## Befehle
 
 - `npm test` – Testsuite ohne Browser (lädt `src/app.js` in einer simulierten Umgebung). Vor jedem Commit ausführen.
-- `npm run build` – baut `index.html` und `sw.js` im Hauptordner (installierbare PWA für GitHub Pages) und `dist/claude-artifact.html` (Einzeldatei für claude.ai). Nach jeder Änderung an `src/` ausführen und `index.html` und `sw.js` mit committen, sonst schlägt die Prüfung auf GitHub fehl.
+- `npm run build` – baut `index.html` und `sw.js` im Hauptordner (installierbare PWA), kopiert die Seite samt Manifest und Icons nach `public/` (für Vercel, nicht eingecheckt) und `dist/claude-artifact.html` (Einzeldatei für claude.ai). Nach jeder Änderung an `src/` ausführen und `index.html` und `sw.js` mit committen, sonst schlägt die Prüfung auf GitHub fehl.
 - `npm run serve` – lokaler Server für den Hauptordner auf http://localhost:8080 (Kamera und Service Worker brauchen localhost oder https).
 
 Keine Abhängigkeiten, nur Node 18 oder neuer.
@@ -18,6 +18,7 @@ Keine Abhängigkeiten, nur Node 18 oder neuer.
   Checkout · Computer-Gegner · Spielmodi · Party- und Trainingsmodi · Zustand · Sprachausgabe · Setup · Spiel · Statistik · Erfolge & Trainingsplan · Turnier · Online · Kamera · Trainer · Einlauf, Jingles · Großer Bildschirm · Dart-Sets · Ereignisse im Setup
 - `src/sw.js` – Vorlage für den Service Worker, der Build setzt die Version ein.
 - Hauptordner: `index.html` und `sw.js` sind **gebaut**, nie direkt bearbeiten. `manifest.webmanifest` und die Icons liegen direkt hier.
+- `vercel.json` – Vercel baut mit `npm run build` und veröffentlicht `public/`.
 - `.github/workflows/pruefen.yml` – führt bei jedem Push die Tests aus und prüft, ob die gebaute Seite zum Quellcode passt.
 - `tests/run.cjs` – Tests. Die App ruft am Ende `window.__pfeilerlTest(api)` auf, falls vorhanden; darüber greifen die Tests auf interne Funktionen zu.
 
@@ -53,7 +54,7 @@ Keine Abhängigkeiten, nur Node 18 oder neuer.
 ## Zwei Laufzeiten
 
 1. **claude.ai** (veröffentlichtes Artifact): `window.claude.use('db' | 'user' | 'sample')` ist verfügbar. Damit laufen Online-Spiele (Dokument `online/<CODE>`), großer Bildschirm (liest dasselbe Dokument), geräteübergreifende Statistik und der KI-Trainer (`sample` mit Bildern).
-2. **Eigenes Hosting / PWA** (GitHub Pages): `window.claude` fehlt. Alles, was darauf aufbaut, prüft das und blendet sich aus oder fällt zurück (Trainer ohne KI, Statistik nur lokal). Kamera-Erkennung funktioniert hier zuverlässiger, weil der Browser auf claude.ai den Kamerazugriff meist blockiert.
+2. **Eigenes Hosting / PWA** (Vercel): `window.claude` fehlt. Alles, was darauf aufbaut, prüft das und blendet sich aus oder fällt zurück (Trainer ohne KI, Statistik nur lokal). Kamera-Erkennung funktioniert hier zuverlässiger, weil der Browser auf claude.ai den Kamerazugriff meist blockiert.
 
 Auf claude.ai erlaubt die Content-Security-Policy externe Skripte nur von cdnjs.cloudflare.com, cdn.jsdelivr.net/npm, cdn.tailwindcss.com und code.jquery.com sowie Schriften von Google Fonts. Keine weiteren externen Ressourcen einbauen.
 
@@ -70,5 +71,5 @@ Drei USB-Kameras seitlich am Board. Pro Kamera eine 2D→1D-Projektion (5 Parame
 
 ## Veröffentlichen
 
-- **GitHub Pages:** Version in `package.json` erhöhen, `npm test`, `npm run build`, alles committen und nach `main` pushen. Pages ist auf „Deploy from a branch“, Branch `main`, Ordner `/ (root)` eingestellt.
+- **Vercel (Live-Version, https://pfeilerl.vercel.app):** Version in `package.json` erhöhen, `npm test`, `npm run build`, alles committen und nach `main` pushen. Vercel baut jeden Push auf `main` automatisch und veröffentlicht `public/`. Schlägt der Build fehl, bleibt die vorige Version live.
 - **claude.ai:** Inhalt von `dist/claude-artifact.html` in den Pfeilerl-Chat geben und dort aktualisieren lassen. Benötigte Fähigkeiten: `db`, `user`, `sample` mit Bildern.
