@@ -1,0 +1,13 @@
+{
+  "name": "pfeilerl",
+  "version": "1.3.1",
+  "description": "Pfeilerl – Dart-Zähler mit 19 Spielmodi, Computer-Gegnern, Statistik, KI-Trainer und Kamera-Erkennung",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node tests/run.cjs",
+    "serve": "node scripts/serve.mjs"
+  },
+  "engines": { "node": ">=18" }
+}

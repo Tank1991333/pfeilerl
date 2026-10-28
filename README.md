@@ -28,8 +28,22 @@ Hinweise: Gleichmäßiges Licht (LED-Ring) verbessert die Erkennung stark. Falsc
 ## Unterschiede zur claude.ai-Version
 
 - Statistik und Spielstände werden nur auf dem jeweiligen Gerät gespeichert.
-- Online-Spiele gegen Freunde funktionieren nur in der claude.ai-Version.
+- Online-Spiele gegen Freunde und der große Bildschirm funktionieren nur in der claude.ai-Version.
+
+## Weiterentwickeln
+
+Der Quellcode liegt in `src/`, die Seite im Hauptordner (`index.html`, `sw.js`) wird daraus gebaut. Nur Node 18 oder neuer nötig, keine weiteren Abhängigkeiten.
+
+```bash
+npm test          # Tests ausführen
+npm run build     # index.html, sw.js und dist/claude-artifact.html bauen
+npm run serve     # http://localhost:8080
+```
+
+`CLAUDE.md` beschreibt Aufbau, Spielmodi-Schnittstelle und Konventionen für die Arbeit mit Claude Code.
 
 ## Aktualisieren
 
-Neue `index.html` hochladen und in `sw.js` die Versionsnummer (`pfeilerl-v1` → `pfeilerl-v2`) erhöhen, damit installierte Apps das Update laden.
+1. In `package.json` die Versionsnummer erhöhen (Korrektur 1.3.0 → 1.3.1, neue Funktion → 1.4.0).
+2. `npm test` und `npm run build` ausführen, alles committen und nach `main` pushen.
+3. GitHub prüft jeden Push automatisch (Reiter „Actions“). Installierte Apps zeigen beim nächsten Öffnen „Neue Version von Pfeilerl“ mit einem Knopf zum Aktualisieren.

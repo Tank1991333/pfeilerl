@@ -1,0 +1,20 @@
+name: Prüfen
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Tests
+        run: npm test
+      - name: Gebaute Seite passt zum Quellcode
+        run: |
+          node scripts/build.mjs
+          git diff --exit-code -- index.html sw.js || { echo "::error::index.html oder sw.js ist nicht aktuell. Bitte 'npm run build' ausführen und die Dateien mit committen."; exit 1; }
