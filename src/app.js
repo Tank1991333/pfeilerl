@@ -10,6 +10,20 @@ const store={
 };
 const clone=o=>JSON.parse(JSON.stringify(o));
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+/* Fremde Daten (Online-Gegner, großer Bildschirm, Datenbank, Sicherungsdatei) bereinigen, bevor sie
+   irgendwo landen: Texte ohne < > " und Backtick, nur endliche Zahlen, keine Prototyp-Schlüssel, begrenzte Tiefe */
+function untrusted(v,d=0){
+  if(d>12) return null;
+  if(typeof v==='string') return v.replace(/[<>"`]/g,'').slice(0,500);
+  if(typeof v==='number') return Number.isFinite(v)?v:0;
+  if(typeof v==='boolean'||v==null) return v;
+  if(Array.isArray(v)) return v.slice(0,2000).map(x=>untrusted(x,d+1));
+  if(typeof v!=='object') return null;
+  const o={};
+  for(const k of Object.keys(v)) if(k!=='__proto__'&&k!=='constructor'&&k!=='prototype') o[k]=untrusted(v[k],d+1);
+  return o;
+}
+const validCode=c=>/^[A-Z0-9]{5}$/.test(c);
 const fmt=n=>(Math.round(n*10)/10).toFixed(1).replace('.',',');
 const val=d=>d.seg*d.mult;
 const label=d=>{
@@ -176,7 +190,7 @@ const MODES={
     targets:()=>CRICKET,
     board(g){
       const ps=g.players,cur=i=>i===g.cur&&!g.winner?'cur':'';
-      return `<div class="tw"><table class="cricket"><thead><tr><th></th>${ps.map((p,i)=>`<th class="${cur(i)}">${esc(p.name)}</th>`).join('')}</tr></thead><tbody>${
+      return `<div class="tw"><table class="cricket"><thead><tr><th><span class="vh">Feld</span></th>${ps.map((p,i)=>`<th class="${cur(i)}">${esc(p.name)}</th>`).join('')}</tr></thead><tbody>${
         CRICKET.map(t=>`<tr class="${ps.every(p=>p.marks[t]===3)?'done':''}"><th>${t===25?'Bull':t}</th>${ps.map((p,i)=>`<td class="${cur(i)}">${MARK[p.marks[t]]}</td>`).join('')}</tr>`).join('')
       }</tbody><tfoot><tr><th>Pkt</th>${ps.map((p,i)=>`<td class="${cur(i)}">${p.points}</td>`).join('')}</tr></tfoot></table></div>`;
     },
@@ -414,7 +428,7 @@ Object.assign(MODES,{
     targets:()=>null,
     board(g){
       const ps=g.players,cur=i=>i===g.cur&&!g.winner?'cur':'';
-      return `<div class="tw"><table class="cricket"><thead><tr><th></th>${ps.map((p,i)=>`<th class="${cur(i)}">${esc(p.name)}</th>`).join('')}</tr></thead><tbody>${
+      return `<div class="tw"><table class="cricket"><thead><tr><th><span class="vh">Feld</span></th>${ps.map((p,i)=>`<th class="${cur(i)}">${esc(p.name)}</th>`).join('')}</tr></thead><tbody>${
         MICKEY.map(t=>`<tr class="${ps.every(p=>p.marks[t]===3)?'done':''}"><th>${mkLabel(t)}</th>${ps.map((p,i)=>`<td class="${cur(i)}">${MARK[p.marks[t]]}</td>`).join('')}</tr>`).join('')
       }</tbody>${g.opts.variant==='nopoints'?'':`<tfoot><tr><th>Pkt</th>${ps.map((p,i)=>`<td class="${cur(i)}">${p.score}</td>`).join('')}</tr></tfoot>`}</table></div>`;
     },
@@ -621,7 +635,8 @@ if(!Array.isArray(setup.sets)) setup.sets=[];
 if(!Array.isArray(setup.regulars)) setup.regulars=[];
 if(!Array.isArray(setup.recent)) setup.recent=[];
 if(!['auto','light','dark'].includes(setup.theme)) setup.theme='auto';
-let setupProf=-1,setupAll=false,setupMore=false,setupMsg='';
+let setupProf=-1,setupAll=false,setupMore=false,setupMsg='',moreErr='',setDraft={n:'',w:''};
+const validGame=g=>!!(g&&typeof g==='object'&&MODES[g.mode]&&Array.isArray(g.players)&&g.players.length>=1&&g.players.length<=8&&g.players.every(p=>p&&typeof p==='object')&&Number.isInteger(g.cur)&&g.cur>=0&&g.cur<g.players.length);
 
 let saved=store.get('dart.game');
 let game=null,history=[],quitArmed=false,wakeLock=null,mod=1,botTimer=null,setupErr='';
@@ -661,7 +676,7 @@ function promptCall(g){const m=MODES[g.mode],p=g.players[g.cur];return m.prompt?
 function renderSetup(){
   const m=MODES[setup.mode],o=setup.opts[setup.mode];
   saved=store.get('dart.game');
-  const resume=saved&&saved.g&&!saved.g.winner&&MODES[saved.g.mode]?
+  const resume=saved&&validGame(saved.g)&&!saved.g.winner?
     `<div class="resume"><span>Laufendes Spiel<small>${esc(MODES[saved.g.mode].name)} mit ${saved.g.players.map(p=>esc(p.name)).join(', ')}</small></span><button class="primary" data-act="resume">Fortsetzen</button></div>`:'';
   const seg=(attr,choices,cur,lab)=>`<div class="seg" role="group" aria-label="${lab}">${choices.map((c,i)=>`<button ${attr}="${i}" class="${cur===c[0]?'on':''}" aria-pressed="${cur===c[0]}">${c[1]}</button>`).join('')}</div>`;
   const modeBtn=([k,x])=>`<button class="mode cat-${x.cat} ${k===setup.mode?'on':''}" data-mode="${k}" aria-pressed="${k===setup.mode}"><span class="mname">${x.name}</span><span class="mdesc">${x.desc}</span></button>`;
@@ -689,14 +704,14 @@ function renderSetup(){
   <details class="more" id="more" ${setupMore?'open':''}><summary>Einstellungen, Dart-Sets und Datensicherung</summary>
   <section><h2>Design</h2>${seg('data-theme',[['auto','Wie Gerät'],['light','Hell'],['dark','Dunkel']],setup.theme,'Design')}</section>
   <section><h2>Dart-Sets</h2>${setup.sets.length?`<ul class="sets">${setup.sets.map(st=>`<li><span>${esc(setLabelS(st))}</span><button class="icon" data-delset="${st.id}" aria-label="Set ${esc(st.name)} löschen">✕</button></li>`).join('')}</ul>`:'<p class="muted">Lege deine Pfeile an und wähle sie im Spielerprofil (⚙). Die Statistik vergleicht dann, mit welchem Set du besser triffst.</p>'}
-  <div class="setrow"><input id="setname" placeholder="Name, z. B. Blaue 22er" maxlength="24" aria-label="Name des Sets"><input id="setw" inputmode="decimal" placeholder="Gramm" maxlength="5" aria-label="Gewicht in Gramm"><button class="ghost" data-act="addset">Anlegen</button></div></section>
+  <div class="setrow"><input id="setname" value="${esc(setDraft.n)}" placeholder="Name, z. B. Blaue 22er" maxlength="24" aria-label="Name des Sets"><input id="setw" value="${esc(setDraft.w)}" inputmode="decimal" placeholder="Gramm" maxlength="5" aria-label="Gewicht in Gramm"><button class="ghost" data-act="addset">Anlegen</button></div>${moreErr&&moreErr.where==='sets'?`<p class="err" role="alert">${esc(moreErr.text)}</p>`:''}</section>
   <section><h2>Stammspieler</h2>${setup.regulars.length?`<ul class="sets">${setup.regulars.map(r=>`<li><span>${esc(r.name)}</span><button class="icon" data-delreg="${esc(r.name)}" aria-label="${esc(r.name)} aus den Stammspielern entfernen">✕</button></li>`).join('')}</ul>`:'<p class="muted">Wer mitspielt, landet automatisch hier. Danach reicht ein Tipp auf den Namen, Spitzname, Dart-Set und Einlauf kommen mit.</p>'}</section>
   <section><h2>Datensicherung</h2><p class="muted">Sichere Statistik, Stammspieler und Dart-Sets als Datei, etwa vor einem Handywechsel. Beim Wiederherstellen kommen nur fehlende Spiele dazu, nichts wird überschrieben.</p>
-  <div class="addrow"><button class="ghost" data-act="backup">Sicherung speichern</button><label class="ghost filebtn">Sicherung einspielen<input type="file" accept=".json,application/json" id="restore" hidden></label></div>${setupMsg?`<p class="okmsg" role="status">${esc(setupMsg)}</p>`:''}</section>
+  <div class="addrow"><button class="ghost" data-act="backup">Sicherung speichern</button><label class="ghost filebtn">Sicherung einspielen<input type="file" accept=".json,application/json" id="restore" class="vh"></label></div>${setupMsg?`<p class="okmsg" role="status">${esc(setupMsg)}</p>`:''}${moreErr&&moreErr.where==='backup'?`<p class="err" role="alert">${esc(moreErr.text)}</p>`:''}</section>
   </details>
   <p class="ver">Pfeilerl Version ${VERSION}</p>
   </div>`;
-  setupMsg='';
+  setupMsg='';moreErr='';
 }
 function quickModes(){
   const ks=setup.recent.filter(k=>MODES[k]);
@@ -740,29 +755,31 @@ async function backupData(){
     const blob=new Blob([JSON.stringify(data)],{type:'application/json'});
     const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`pfeilerl-sicherung-${day}.json`;
     document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
-    setupMsg=`Sicherung mit ${nGames(data.records.length)} gespeichert.`;setupErr='';setupMore=true;
-  }catch(e){setupErr='Die Sicherung ließ sich hier nicht speichern. Öffne Pfeilerl im Browser und versuch es dort.';}
+    setupMsg=`Sicherung mit ${nGames(data.records.length)} gespeichert.`;setupMore=true;
+  }catch(e){moreErr={where:'backup',text:'Die Sicherung ließ sich hier nicht speichern. Öffne Pfeilerl im Browser und versuch es dort.'};setupMore=true;}
   renderSetup();
 }
 function mergeBackup(data){
+  data=untrusted(data);
   if(!data||data.app!=='pfeilerl'||!Array.isArray(data.records)) throw new Error('keine Sicherung');
   const have=new Set(localRecs().map(r=>r.id));
   const add=data.records.filter(r=>r&&r.id&&!have.has(r.id)&&MODES[r.mode]&&Array.isArray(r.players)).map(r=>Object.assign({},r,{pending:true}));
   const all=localRecs().concat(add).sort((x,y)=>x.ts-y.ts);
   store.set('dart.records',all.slice(-1000));
   let sets=0,regs=0;
-  (Array.isArray(data.sets)?data.sets:[]).forEach(st=>{if(st&&st.id&&st.name&&!setup.sets.some(x=>x.id===st.id)){setup.sets.push(st);sets++;}});
+  (Array.isArray(data.sets)?data.sets:[]).forEach(st=>{if(st&&/^[A-Za-z0-9_-]{1,40}$/.test(st.id)&&st.name&&!setup.sets.some(x=>x.id===st.id)){setup.sets.push(st);sets++;}});
   (Array.isArray(data.regulars)?data.regulars:[]).forEach(r=>{if(r&&r.name&&!setup.regulars.some(x=>x.name===r.name)){setup.regulars.push(r);regs++;}});
   if(data.coach&&!store.get('dart.coach')) store.set('dart.coach',data.coach);
   saveSetup();
   return {games:add.length,sets,regs};
 }
 async function restoreFile(file){
+  if(file.size>20*1024*1024){moreErr={where:'backup',text:'Die Datei ist zu groß für eine Pfeilerl-Sicherung (höchstens 20 MB).'};setupMore=true;renderSetup();return;}
   try{
     const n=mergeBackup(JSON.parse(await file.text()));
-    setupMsg=n.games+n.regs+n.sets?`Wiederhergestellt: ${nGames(n.games)}, ${n.regs} Stammspieler, ${n.sets} Dart-Sets.`:'Alles aus dieser Sicherung ist schon da.';setupErr='';
+    setupMsg=n.games+n.regs+n.sets?`Wiederhergestellt: ${nGames(n.games)}, ${n.regs} Stammspieler, ${n.sets} Dart-Sets.`:'Alles aus dieser Sicherung ist schon da.';
     loadRecords();
-  }catch(e){setupErr='Diese Datei ist keine Pfeilerl-Sicherung.';setupMsg='';}
+  }catch(e){moreErr={where:'backup',text:'Diese Datei ist keine Pfeilerl-Sicherung.'};setupMsg='';}
   setupMore=true;renderSetup();
 }
 const botName=lv=>'CPU '+BOTS[lv].n;
@@ -777,7 +794,7 @@ const LOGO='<svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" 
 /* ---------- Spiel ---------- */
 function startGame(fromSaved,cfg){
   if(fromSaved){
-    game=saved.g;history=saved.h||[];if(!game.gid) game.gid=newId();
+    game=untrusted(saved.g);history=Array.isArray(saved.h)?saved.h.map(h=>untrusted(h)).filter(validGame):[];if(!game.gid) game.gid=newId();
     if(game.screen&&!scr) scr={code:game.screen};
     if(game.online&&!onl){const o=store.get('dart.online');if(o&&o.code===game.online){onl=o;onlRev=0;onlSubscribe();}}
     if(game.mode==='x01'){game.leg=game.leg||1;game.legStarter=game.legStarter||0;game.players.forEach(p=>{for(const k of ['v100','v140','v180','f9','f9d','coAtt','coHit','finish','visits','legs','sets','legsWon','scoredPrev','legDarts0','bestLeg']) if(typeof p[k]!=='number') p[k]=0;});}
@@ -794,7 +811,7 @@ function startGame(fromSaved,cfg){
   setupErr='';quitArmed=false;
   const m=MODES[game.mode];
   app.innerHTML=`<div class="wrap game">
-  <header class="gbar"><div><div class="gmode">${m.name}</div><div class="gsub">${esc(m.sub(game.opts))}${game.online?` <b class="code">Online ${esc(game.online)}</b>`:''}${game.screen?` <b class="code">Bildschirm ${esc(game.screen)}</b>`:''}</div></div><div class="gtools"><button class="ghost" id="tvbtn" aria-label="Großer Bildschirm">📺</button><button class="ghost" id="voice"></button><button class="ghost" id="quit">Beenden</button></div></header>
+  <header class="gbar"><div><h1 class="gmode">${m.name}</h1><div class="gsub">${esc(m.sub(game.opts))}${game.online?` <b class="code">Online ${esc(game.online)}</b>`:''}${game.screen?` <b class="code">Bildschirm ${esc(game.screen)}</b>`:''}</div></div><div class="gtools"><button class="ghost" id="tvbtn" aria-label="Großer Bildschirm">📺</button><button class="ghost" id="voice"></button><button class="ghost" id="quit">Beenden</button></div></header>
   <div id="score"></div>
   <div class="turn"><div class="hint" id="hint" aria-live="polite"></div><div class="visit" id="visit"></div></div>
   <p class="camline" id="camstat"${cam.active?'':' hidden'}>${esc(cam.last||'Kamera aktiv')}</p>
@@ -994,6 +1011,7 @@ function update(){
   document.getElementById('undo').disabled=!history.length;
   document.getElementById('miss').disabled=!!(game.locked||game.winner||game.legDone||bot||wait);
   const ov=document.getElementById('ov');
+  document.querySelectorAll('.wrap.game > :not(#ov)').forEach(el=>{el.inert=!!game.winner;});
   if(game.winner){
     const names=game.winner.map(i=>esc(game.players[i].name));
     const na=newAchievements(game),multi=game.players.filter(p=>!p.bot).length>1;
@@ -1061,11 +1079,11 @@ async function deleteRecord(id){
 async function loadRecords(){
   const local=localRecs();
   const col=await getCol();
-  if(!col) return local;
+  if(!col) return local.map(r=>untrusted(r));
   try{
     const snap=await col.orderBy('ts','desc').limit(1000).get();
     const map=new Map();
-    snap.docs.forEach(d=>{if(d.exists) map.set(d.id,Object.assign({},d.data(),{id:d.id}));});
+    snap.docs.forEach(d=>{if(d.exists) map.set(d.id,untrusted(Object.assign({},d.data(),{id:d.id})));});
     for(const r of local){
       if(r.pending&&!map.has(r.id)){
         const c=clone(r);delete c.pending;
@@ -1075,7 +1093,7 @@ async function loadRecords(){
     const all=[...map.values()].sort((a,b)=>a.ts-b.ts);
     store.set('dart.records',all.slice(-1000));
     return all;
-  }catch(e){return local;}
+  }catch(e){return local.map(r=>untrusted(r));}
 }
 function buildRecord(g){
   const m=MODES[g.mode];
@@ -1085,7 +1103,7 @@ function buildRecord(g){
 const sv={open:false,mode:'x01',player:null,recs:[],armed:null};
 async function renderStats(){
   sv.open=true;sv.mode='profil';sv.armed=null;
-  app.innerHTML='<div class="wrap"><header class="gbar"><div class="gmode">Statistik</div><button class="ghost" data-act="back">Zurück</button></header><p class="muted">Statistik wird geladen …</p></div>';
+  app.innerHTML='<div class="wrap"><header class="gbar"><h1 class="gmode">Statistik</h1><button class="ghost" data-act="back">Zurück</button></header><p class="muted">Statistik wird geladen …</p></div>';
   window.scrollTo(0,0);
   const recs=await loadRecords();
   if(!sv.open||game) return;
@@ -1205,7 +1223,7 @@ function drawStats(){
     <section><h2>${esc(sv.player)}</h2><div class="sgrid">${detail(a)}</div>${trendSVG(a.trend)}${heatSVG(es)}</section>
     <section><h2>Letzte Spiele</h2><ul class="games">${recs.slice().reverse().slice(0,20).map(gameRow).join('')}</ul></section>`;
   }
-  app.innerHTML=`<div class="wrap"><header class="gbar"><div class="gmode">Statistik</div><button class="ghost" data-act="back">Zurück</button></header>${tabs}${body}</div>`;
+  app.innerHTML=`<div class="wrap"><header class="gbar"><h1 class="gmode">Statistik</h1><button class="ghost" data-act="back">Zurück</button></header>${tabs}${body}</div>`;
 }
 function statsClick(t){
   const a=t.dataset.act;
@@ -1298,7 +1316,7 @@ function drawProfile(){
     body=`${chips}${setsHTML(es)}<section><h2>Trainingsplan</h2><div class="tips">${sv.tips.map((t,i)=>`<div class="tip"><b>${esc(t.t)}</b><p>${esc(t.why)}</p><button class="ghost" data-train="${i}">Übernehmen</button></div>`).join('')}</div></section>
     <section><h2>Erfolge <span class="muted">${done} von ${ACH.length}</span></h2><div class="ach">${ACH.map(a=>{const ok=achDone(a,es),prog=!ok&&a.c?` <em>${Math.min(a.c(es),a.goal)}/${a.goal}</em>`:'';return `<div class="a ${ok?'':'lock'}"><b>${ok?'★ ':''}${esc(a.n)}</b><span>${esc(a.d)}${prog}</span></div>`;}).join('')}</div></section>`;
   }
-  app.innerHTML=`<div class="wrap"><header class="gbar"><div class="gmode">Statistik</div><button class="ghost" data-act="back">Zurück</button></header>${statTabs()}${body}</div>`;
+  app.innerHTML=`<div class="wrap"><header class="gbar"><h1 class="gmode">Statistik</h1><button class="ghost" data-act="back">Zurück</button></header>${statTabs()}${body}</div>`;
 }
 
 /* ---------- Turnier ---------- */
@@ -1344,7 +1362,7 @@ function standings(){
   return st.sort((x,y)=>y.pts-x.pts||y.s-x.s);
 }
 function renderTour(){
-  const hdr='<header class="gbar"><div class="gmode">Turnier</div><button class="ghost" data-act="back">Zurück</button></header>';
+  const hdr='<header class="gbar"><h1 class="gmode">Turnier</h1><button class="ghost" data-act="back">Zurück</button></header>';
   if(!tour){
     const md=MODES[setup.mode];
     app.innerHTML=`<div class="wrap">${hdr}<p class="muted">Spielmodus, Regeln und Teilnehmer kommen vom Startbildschirm. Jedes Match wird zu zweit gespielt, Computer-Gegner spielen mit.</p>
@@ -1436,7 +1454,9 @@ async function onlSubscribe(){
     if(!snap.exists||!onl) return;
     const d=snap.data();if(!d||typeof d.rev!=='number'||d.rev<=onlRev) return;
     onlRev=d.rev;
-    let st;try{st=JSON.parse(d.state);}catch(e){return;}
+    let st;try{st=untrusted(JSON.parse(d.state));}catch(e){return;}
+    if(!st||!validGame(st.g)) return;
+    st.h=Array.isArray(st.h)?st.h.filter(validGame):[];
     const prevCur=game?game.cur:-1,wasWin=!!(game&&game.winner),prevGid=game&&game.gid;
     game=st.g;history=st.h||[];
     store.set('dart.game',{g:game,h:history});
@@ -1451,7 +1471,7 @@ function onlLeave(){
   onl=null;onlRev=0;store.del('dart.online');
 }
 async function renderOnline(){
-  const hdr='<header class="gbar"><div class="gmode">Online</div><button class="ghost" data-act="back">Zurück</button></header>';
+  const hdr='<header class="gbar"><h1 class="gmode">Online</h1><button class="ghost" data-act="back">Zurück</button></header>';
   if(!onlView.checking){
     onlView.checking=true;
     app.innerHTML=`<div class="wrap">${hdr}<p class="muted">Verbindung wird geprüft …</p></div>`;
@@ -1493,12 +1513,12 @@ async function onlClick(t){
   }
   if(a==='onljoin'){
     const code=(document.getElementById('onlcode').value||'').trim().toUpperCase();
-    if(code.length<5){onlView.err='Bitte den 5-stelligen Code eingeben.';renderOnline();return;}
+    if(!validCode(code)){onlView.err='Der Code besteht aus 5 Buchstaben oder Ziffern.';renderOnline();return;}
     try{
       const db=await getDbNs();
       const snap=await db.doc('online/'+code).get();
       if(!snap.exists){onlView.err='Kein Spiel mit diesem Code gefunden.';renderOnline();return;}
-      const d=snap.data();onlView.st=JSON.parse(d.state);onlView.rev=d.rev||0;onlView.code=code;onlView.step='seat';renderOnline();
+      const d=snap.data(),st=untrusted(JSON.parse(d.state));if(!st||!validGame(st.g)){onlView.err='Dieses Spiel ist beschädigt und lässt sich nicht öffnen.';renderOnline();return;}onlView.st=st;onlView.rev=typeof d.rev==='number'?d.rev:0;onlView.code=code;onlView.step='seat';renderOnline();
     }catch(e){onlView.err='Beitreten hat nicht geklappt. Prüfe, ob der Link mit dir geteilt wurde.';renderOnline();}
     return;
   }
@@ -1709,7 +1729,7 @@ function calClick(e){
   renderCam();
 }
 function renderCam(){
-  const hdr='<header class="gbar"><div class="gmode">Kamera</div><button class="ghost" data-act="back">Zurück</button></header>';
+  const hdr='<header class="gbar"><h1 class="gmode">Kamera</h1><button class="ghost" data-act="back">Zurück</button></header>';
   if(cam.calSlot>=0){
     const k=cam.calPts.length;
     app.innerHTML=`<div class="wrap">${hdr}<p>Kamera ${cam.calSlot+1}: Tippe auf <b>${CAL_PTS[k][0]}</b> <span class="muted">(Punkt ${k+1} von ${CAL_PTS.length})</span></p>
@@ -1843,7 +1863,7 @@ function errText(e){
   return 'Das hat nicht geklappt. Bitte später nochmal versuchen.';
 }
 async function openCoach(){
-  app.innerHTML='<div class="wrap"><header class="gbar"><div class="gmode">Trainer</div><button class="ghost" data-act="back">Zurück</button></header><p class="muted">Trainer wird geladen …</p></div>';
+  app.innerHTML='<div class="wrap"><header class="gbar"><h1 class="gmode">Trainer</h1><button class="ghost" data-act="back">Zurück</button></header><p class="muted">Trainer wird geladen …</p></div>';
   window.scrollTo(0,0);
   coach.recs=await loadRecords();
   const s=await getSample();coach.ai=!!s;coach.imgOK=false;
@@ -1879,11 +1899,11 @@ function renderCoach(){
     `<p class="muted">${coach.ai?'Fordere eine Analyse an, dann stellt dir der Trainer eine passende Einheit zusammen.':'Erstelle eine Einheit aus deinen Befunden.'}</p>`;
   const fb=allDone&&coach.ai?(c.feedback||coach.fbBusy?`<div class="coachbox" id="coachfb">${c.feedback?fmtText(c.feedback):'Trainer schreibt …'}</div>`:`<button class="ghost" data-act="coachfb" style="width:100%">Feedback zur Einheit holen</button>`):'';
   const tech=coach.imgOK?`<section><h2>Technik-Check</h2><p class="muted">Lass dich von der Seite filmen oder fotografieren, ganzer Körper im Bild, Wurfarm zur Kamera. Bei einem Video nimmt der Trainer ${Math.min(coach.imgMax||4,6)} Einzelbilder aus dem Wurf.</p>
-    <label class="ghost filebtn ${coach.techBusy?'off':''}">Foto oder Video wählen<input type="file" id="techfile" accept="image/*,video/*" hidden ${coach.techBusy?'disabled':''}></label>
+    <label class="ghost filebtn ${coach.techBusy?'off':''}">Foto oder Video wählen<input type="file" id="techfile" accept="image/*,video/*" class="vh" ${coach.techBusy?'disabled':''}></label>
     ${c.tech||coach.techBusy?`<div class="coachbox" id="techout">${c.tech?fmtText(c.tech):'Trainer schaut sich die Bilder an …'}</div>`:''}</section>`:'';
   const chat=coach.ai?`<section><h2>Frag den Trainer</h2>${c.chat.length?`<div class="chat">${c.chat.map((m,i)=>`<div class="bubble ${m.role}" ${i===c.chat.length-1?'id="lastbubble"':''}>${m.content?fmtText(m.content):'…'}</div>`).join('')}</div>`:'<p class="muted">Zum Beispiel: „Welches Double soll ich mir als Lieblings-Double nehmen?“ oder „Wie trainiere ich gegen die Nervosität bei Finishes?“</p>'}
     <div class="joinrow"><input id="coachq" placeholder="Deine Frage" autocomplete="off" aria-label="Frage an den Trainer" ${coach.chatBusy?'disabled':''}><button class="primary" data-act="coachask" ${coach.chatBusy?'disabled':''}>Senden</button></div></section>`:'';
-  app.innerHTML=`<div class="wrap"><header class="gbar"><div class="gmode">Trainer</div><button class="ghost" data-act="back">Zurück</button></header>${chips}
+  app.innerHTML=`<div class="wrap"><header class="gbar"><h1 class="gmode">Trainer</h1><button class="ghost" data-act="back">Zurück</button></header>${chips}
   <section><h2>Befunde für ${esc(coach.player)}</h2>${finds}</section>
   <section><h2>Beratung</h2>${ana}</section>
   <section><h2>Trainingseinheit</h2>${planHTML}<div class="addrow" style="margin-top:8px"><button class="ghost" data-act="coachlocal">${plan.length?'Schnellplan neu erstellen':'Schnellplan erstellen'}</button></div>${fb}</section>
@@ -2110,7 +2130,7 @@ async function tvButton(){
 }
 const hasClaude=()=>!!(window.claude&&typeof window.claude.use==='function');
 function renderTVJoin(){
-  app.innerHTML=`<div class="wrap"><header class="gbar"><div class="gmode">Bildschirm</div><button class="ghost" data-act="back">Zurück</button></header>
+  app.innerHTML=`<div class="wrap"><header class="gbar"><h1 class="gmode">Bildschirm</h1><button class="ghost" data-act="back">Zurück</button></header>
   ${tv.err?`<p class="err" role="alert">${esc(tv.err)}</p>`:''}
   <p class="muted">Dieses Gerät wird zur großen Anzeige, etwa am Fernseher oder PC. Am Handy startest du das Spiel wie gewohnt und tippst oben auf 📺. Den angezeigten Code gibst du hier ein.</p>
   ${hasClaude()?`<div class="joinrow"><input id="tvcode" maxlength="5" placeholder="Code" autocapitalize="characters" autocomplete="off" aria-label="Bildschirm-Code"><button class="primary" data-act="tvgo">Verbinden</button></div>`:'<p class="empty">Der große Bildschirm funktioniert in der Pfeilerl-Version auf claude.ai, weil dort der gemeinsame Spielstand gespeichert wird. In der installierten Version ist dieser Modus nicht verfügbar.</p>'}
@@ -2119,14 +2139,15 @@ function renderTVJoin(){
 async function tvGo(){
   tv.err='';
   const code=((document.getElementById('tvcode')||{}).value||'').trim().toUpperCase();
-  if(code.length<5){tv.err='Bitte den 5-stelligen Code eingeben.';renderTVJoin();return;}
+  if(!validCode(code)){tv.err='Der Code besteht aus 5 Buchstaben oder Ziffern.';renderTVJoin();return;}
   const db=await getDbNs();
   if(!db){tv.err='Der große Bildschirm funktioniert in der Pfeilerl-Version auf claude.ai.';renderTVJoin();return;}
   tv.code=code;tv.g=null;
   if(tv.unsub) try{tv.unsub();}catch(e){}
   tv.unsub=db.doc('online/'+code).onSnapshot(snap=>{
     if(!snap.exists){if(onTV()) renderTV();return;}
-    let st;try{st=JSON.parse(snap.data().state);}catch(e){return;}
+    let st;try{st=untrusted(JSON.parse(snap.data().state));}catch(e){return;}
+    if(!st||!validGame(st.g)) return;
     const prev=tv.g;tv.g=st.g;
     tvAnnounce(prev,tv.g);
     if(onTV()) renderTV();
@@ -2181,7 +2202,7 @@ function profPanel(pl,i){
   return `<li class="profpanel"><div class="profbox">
   <label class="olabel" for="nick${i}">Spitzname für die Ansage</label><input id="nick${i}" class="pinput" data-nick="${i}" value="${esc(pl.nick||'')}" maxlength="24" placeholder="z. B. The Rocket">
   <span class="olabel">Einlauf-Jingle</span><div class="seg" role="group" aria-label="Jingle">${Object.entries(JINGLES).filter(([k])=>k!=='robot').map(([k,j])=>`<button data-jg="${i}:${k}" class="${(pl.jingle||'fanfare')===k?'on':''}" aria-pressed="${(pl.jingle||'fanfare')===k}">${j.n}</button>`).join('')}${pl.aid?`<button data-jg="${i}:file" class="${pl.jingle==='file'?'on':''}" aria-pressed="${pl.jingle==='file'}">Eigene Musik</button>`:''}</div>
-  <label class="ghost filebtn">${pl.aid?'Andere Musikdatei wählen':'Eigene Musikdatei wählen'}<input type="file" accept="audio/*" data-pf="${i}" hidden></label>
+  <label class="ghost filebtn">${pl.aid?'Andere Musikdatei wählen':'Eigene Musikdatei wählen'}<input type="file" accept="audio/*" data-pf="${i}" class="vh"></label>
   <label class="olabel" for="pset${i}">Dart-Set</label><select id="pset${i}" class="pinput" data-pset="${i}"><option value="">Kein Set</option>${setup.sets.map(st=>`<option value="${st.id}" ${pl.set===st.id?'selected':''}>${esc(setLabelS(st))}</option>`).join('')}</select>
   <div class="addrow"><button class="ghost" data-preview="${i}">Einlauf anhören</button><button class="primary sm" data-prof="${i}">Fertig</button></div></div></li>`;
 }
@@ -2200,8 +2221,11 @@ function profClick(t){
   if(t.dataset.walk!==undefined){setup.walkon=t.dataset.walk==='1';saveSetup();renderSetup();return;}
   if(a==='addset'){
     const n=(document.getElementById('setname').value||'').trim(),w=parseFloat((document.getElementById('setw').value||'').replace(',','.'));
-    if(!n){setupErr='Bitte einen Namen für das Set eingeben.';renderSetup();return;}
-    setup.sets.push({id:newId(),name:n,w:isFinite(w)&&w>0?Math.round(w*10)/10:0});setupErr='';saveSetup();renderSetup();return;
+    const wRaw=(document.getElementById('setw').value||'').trim();setDraft={n,w:wRaw};
+    if(!n){moreErr={where:'sets',text:'Bitte einen Namen für das Set eingeben.'};setupMore=true;renderSetup();return;}
+    if(wRaw&&!(isFinite(w)&&w>=10&&w<=60)){moreErr={where:'sets',text:'Das Gewicht bitte in Gramm zwischen 10 und 60 angeben, z. B. 22 oder 23,5.'};setupMore=true;renderSetup();return;}
+    if(setup.sets.some(x=>x.name.toLowerCase()===n.toLowerCase())){moreErr={where:'sets',text:`Ein Set „${n}“ gibt es schon.`};setupMore=true;renderSetup();return;}
+    setup.sets.push({id:newId(),name:n,w:wRaw?Math.round(w*10)/10:0});setDraft={n:'',w:''};saveSetup();setupMore=true;renderSetup();return;
   }
   if(t.dataset.delset){const id=t.dataset.delset;setup.sets=setup.sets.filter(x=>x.id!==id);setup.players.forEach(p=>{if(p.set===id) p.set='';});saveSetup();renderSetup();}
 }
@@ -2265,7 +2289,7 @@ window.pfeilerlUpdate=()=>{
   document.getElementById('updx').onclick=()=>d.remove();
 };
 
-if(typeof window.__pfeilerlTest==='function') window.__pfeilerlTest({MODES,CATS,checkout,classify,fitCal,triangulate,startGame,throwDart,nextVisit,undo,getGame:()=>game,setup,loadRecords,onlClick,tvClick,profClick,coachClick,drawStats,sv,newAchievements,gameKey,VERSION,dupName,mergeBackup,quickModes,rememberPlayers,addRegular,localRecs,getOnl:()=>onl,getTv:()=>tv,els:null});
+if(typeof window.__pfeilerlTest==='function') window.__pfeilerlTest({MODES,CATS,checkout,classify,fitCal,triangulate,startGame,throwDart,nextVisit,undo,getGame:()=>game,setup,loadRecords,onlClick,tvClick,profClick,coachClick,drawStats,sv,newAchievements,gameKey,VERSION,dupName,untrusted,validGame,validCode,mergeBackup,quickModes,rememberPlayers,addRegular,localRecs,getOnl:()=>onl,getTv:()=>tv,els:null});
 applyTheme();
 renderSetup();
 })();

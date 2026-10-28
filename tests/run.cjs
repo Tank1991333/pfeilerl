@@ -104,6 +104,16 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
    api.setup.players=[{name:'Anna'},{name:'anna'}];api.setup.mode='x01';api.startGame(false);
    ok(!api.getGame(),'Spiel mit doppelten Namen startet nicht');}
 
+  console.log('Sicherheit: fremde Daten');
+  {const {api}=env();
+   const u=api.untrusted({name:'<img src=x onerror="x()">',score:'<b>1</b>',n:NaN,arr:[1,'<i>'],['__proto__']:{evil:1},o:{deep:'`a`'}});
+   ok(![u.name,u.score,u.arr[1],u.o.deep].some(x=>/[<>"`]/.test(x))&&u.n===0,'HTML-Zeichen und NaN werden entfernt',JSON.stringify(u));
+   ok(!Object.keys(u).includes('__proto__')&&u.evil===undefined,'__proto__ wird verworfen');
+   ok(!api.validGame({mode:'gibtsnicht',players:[{}],cur:0})&&!api.validGame({mode:'x01',players:[{}],cur:3})&&api.validGame({mode:'x01',players:[{}],cur:0}),'Unbekannte Modi und falsche Indizes werden abgelehnt');
+   ok(api.validCode('K7QZD')&&!api.validCode('AB/CD')&&!api.validCode('abc'),'Codes nur aus 5 Buchstaben oder Ziffern');
+   const n=api.mergeBackup({app:'pfeilerl',records:[{id:'x1',ts:1,mode:'x01',opts:{},players:[{name:'A',darts:'<img src=x onerror=alert(1)>'}]}],sets:[{id:'" onclick="alert(1)',name:'Böse'}],regulars:[]});
+   ok(n.sets===0&&!/[<>]/.test(JSON.stringify(api.localRecs())),'Sicherungsdatei: Codes entfernt, ungültige Set-IDs abgelehnt');}
+
   console.log('Tastatur');
   {const e=env({queueTimers:true}),api=e.api;
    api.setup.players=[{name:'Anna'},{name:'Ben'}];api.setup.mode='x01';
@@ -136,6 +146,24 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
    ok(B.api.getGame().visit.length===0,'Ben kann nicht für Anna werfen');
    [1,2,3].forEach(()=>A.api.throwDart({seg:20,mult:3}));A.api.nextVisit();await sleep(20);
    ok(B.api.getGame().players[0].score===121&&B.api.getGame().cur===1,'Bens Gerät sieht Annas 180');}
+
+  console.log('Online: manipulierter Spielstand vom Gegner');
+  {const A=env({withClaude:true,name:'c'}),B=env({withClaude:true,name:'d'});
+   A.api.setup.players=[{name:'Cleo'},{name:'Dan'}];A.api.setup.mode='x01';
+   A.api.setup.opts.x01={start:301,out:'double',in:'straight',legs:1,sets:1};
+   await A.api.onlClick({dataset:{act:'online'}});await sleep(10);
+   await A.api.onlClick({dataset:{act:'onlcreate'}});await sleep(20);
+   const code=A.api.getOnl().code;
+   B.els.onlcode={value:code};
+   await B.api.onlClick({dataset:{act:'onljoin'}});await sleep(10);
+   await B.api.onlClick({dataset:{ojseat:'1'}});await sleep(20);
+   const g=JSON.parse(JSON.stringify(A.api.getGame()));g.players[0].score='<img src=x onerror=alert(1)>';g.players[0].name='"><script>';
+   await fakeDb.doc('online/'+code).set({state:JSON.stringify({g,h:[]}),rev:9999,ts:Date.now()});await sleep(20);
+   const bg=B.api.getGame();
+   ok(bg&&!/[<>"]/.test(String(bg.players[0].score)+bg.players[0].name),'Werte vom Gegner kommen bereinigt an',bg&&bg.players[0].score);
+   const bad=JSON.parse(JSON.stringify(g));bad.mode='gibtsnicht';
+   await fakeDb.doc('online/'+code).set({state:JSON.stringify({g:bad,h:[]}),rev:10000,ts:Date.now()});await sleep(20);
+   ok(B.api.getGame().mode==='x01','Kaputter Spielstand vom Gegner wird ignoriert');}
 
   console.log('Kamera-Triangulation');
   {const {api}=env();

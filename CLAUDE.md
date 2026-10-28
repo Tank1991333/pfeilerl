@@ -6,7 +6,7 @@ Pfeilerl ist ein Dart-Zähler als Web-App ohne Framework: eine HTML-Seite, eine 
 
 - `npm test` – Testsuite ohne Browser (lädt `src/app.js` in einer simulierten Umgebung). Vor jedem Commit ausführen.
 - `npm run build` – baut `index.html` und `sw.js` im Hauptordner (installierbare PWA), kopiert die Seite samt Manifest und Icons nach `public/` (für Vercel, nicht eingecheckt) und `dist/claude-artifact.html` (Einzeldatei für claude.ai). Nach jeder Änderung an `src/` ausführen und `index.html` und `sw.js` mit committen, sonst schlägt die Prüfung auf GitHub fehl.
-- `npm run serve` – lokaler Server für den Hauptordner auf http://localhost:8080 (Kamera und Service Worker brauchen localhost oder https).
+- `npm run serve` – lokaler Server für `public/` (also genau das, was Vercel veröffentlicht; vorher `npm run build`) auf http://localhost:8080, nur auf diesem Rechner. Mit `HOST=0.0.0.0` auch im WLAN, etwa zum Testen am Handy. Kamera und Service Worker brauchen localhost oder https.
 
 Keine Abhängigkeiten, nur Node 18 oder neuer.
 
@@ -17,8 +17,9 @@ Keine Abhängigkeiten, nur Node 18 oder neuer.
 - `src/app.js` – die ganze App in einer IIFE, gegliedert in Abschnitte (`/* ---------- Name ---------- */`):
   Checkout · Computer-Gegner · Spielmodi · Party- und Trainingsmodi · Zustand · Sprachausgabe · Setup · Spiel · Statistik · Erfolge & Trainingsplan · Turnier · Online · Kamera · Trainer · Einlauf, Jingles · Großer Bildschirm · Dart-Sets · Ereignisse im Setup
 - `src/sw.js` – Vorlage für den Service Worker, der Build setzt die Version ein.
+- `src/fonts.css` und `fonts/` – Barlow und Barlow Condensed selbst gehostet (OFL, lateinischer Zeichensatz). Die PWA lädt keine Schriften von Google (DSGVO), nur die claude.ai-Fassung nutzt Google Fonts. Der Build tauscht dafür den Block zwischen `<!--FONTS-->` und `<!--/FONTS-->` in `src/index.html`.
 - Hauptordner: `index.html` und `sw.js` sind **gebaut**, nie direkt bearbeiten. `manifest.webmanifest` und die Icons liegen direkt hier.
-- `vercel.json` – Vercel baut mit `npm run build` und veröffentlicht `public/`.
+- `vercel.json` – Vercel baut mit `npm run build` und veröffentlicht `public/`. Setzt Sicherheitsheader (CSP nur `'self'`, kein Einbetten in fremde Seiten, Kamera nur für die eigene Seite). Neue externe Quellen brauchen dort einen Eintrag.
 - `.github/workflows/pruefen.yml` – führt bei jedem Push die Tests aus und prüft, ob die gebaute Seite zum Quellcode passt.
 - `tests/run.cjs` – Tests. Die App ruft am Ende `window.__pfeilerlTest(api)` auf, falls vorhanden; darüber greifen die Tests auf interne Funktionen zu.
 
@@ -48,6 +49,8 @@ Keine Abhängigkeiten, nur Node 18 oder neuer.
 **Datensicherung:** `backupData()` lädt eine JSON-Datei `{app:'pfeilerl',format:1,version,records,sets,regulars,coach}` herunter. `mergeBackup()` fügt nur fehlende Spiele (nach `id`), Sets und Stammspieler hinzu und markiert neue Spiele als `pending`, damit sie auf claude.ai in die Datenbank wandern.
 
 **Update-Hinweis:** Das Service-Worker-Skript aus `scripts/build.mjs` prüft beim Zurückkehren in die App und alle 30 Minuten auf Updates. Übernimmt ein neuer Service Worker, ruft es `window.pfeilerlUpdate()` auf, das einen Hinweis mit „Aktualisieren“ zeigt.
+
+**Fremde Daten:** Alles, was nicht vom eigenen Gerät stammt (Online-Spielstand, großer Bildschirm, Datenbank-Datensätze, Sicherungsdatei, gespeicherter Spielstand), läuft durch `untrusted()` (entfernt `< > "` und Backtick aus Texten, nur endliche Zahlen, keine `__proto__`-Schlüssel) und `validGame()`. Codes prüft `validCode()`. In Vorlagen trotzdem alle Texte mit `esc()` ausgeben.
 
 **Lokaler Speicher (`localStorage`):** `dart.setup`, `dart.game`, `dart.records`, `dart.tour`, `dart.online`, `dart.coach`, `dart.camcal`, `dart.camslots`, `dart.camset`. Eigene Einlaufmusik liegt in IndexedDB (`pfeilerl` / `audio`).
 

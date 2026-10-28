@@ -1,14 +1,20 @@
 // Baut aus src/ zwei Varianten:
 //  index.html + sw.js im Hauptordner – installierbare PWA (GitHub Pages, Branch main, Ordner / (root))
-//  public/                            – dieselbe Seite samt Manifest und Icons für Vercel (vercel.json)
+//  public/                            – dieselbe Seite samt Manifest, Icons und Schriften für Vercel (vercel.json)
+// Die PWA nutzt die Schriften aus fonts/ (keine Anfragen an Google, DSGVO), die claude.ai-Fassung Google Fonts.
 //  dist/claude-artifact.html          – Einzeldatei für claude.ai (KI-Trainer, Online, Bildschirm)
 // Manifest und Icons liegen direkt im Hauptordner und werden nicht verändert.
-import {readFileSync,writeFileSync,mkdirSync,copyFileSync,rmSync} from 'node:fs';
+import {readFileSync,writeFileSync,mkdirSync,copyFileSync,rmSync,readdirSync} from 'node:fs';
 const {version}=JSON.parse(readFileSync('package.json','utf8'));
 const tpl=readFileSync('src/index.html','utf8');
 const css=readFileSync('src/styles.css','utf8');
 const js=readFileSync('src/app.js','utf8').replaceAll('__VERSION__',version);
 const base=tpl.replace('/*STYLES*/',()=>css).replace('/*SCRIPT*/',()=>js);
+const fontsCss=readFileSync('src/fonts.css','utf8');
+const pwaFonts=`<link rel="preload" href="fonts/barlow-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/barlow-condensed-700.woff2" as="font" type="font/woff2" crossorigin>
+<style>
+${fontsCss}</style>`;
 const pwaHead=`<link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#7B5CFF">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -27,10 +33,12 @@ if('serviceWorker' in navigator){window.addEventListener('load',()=>{
   }).catch(()=>{});
 });}
 </script>`;
-writeFileSync('index.html',base.replace('</title>','</title>\n'+pwaHead).replace('<!--PWA-->',pwaBody));
+const FONTS=/<!--FONTS-->[\s\S]*?<!--\/FONTS-->/;
+writeFileSync('index.html',base.replace(FONTS,()=>pwaFonts).replace('</title>','</title>\n'+pwaHead).replace('<!--PWA-->',pwaBody));
 writeFileSync('sw.js',readFileSync('src/sw.js','utf8').replaceAll('__VERSION__',version));
 rmSync('public',{recursive:true,force:true});mkdirSync('public');
 for(const f of ['index.html','sw.js','manifest.webmanifest','icon-192.png','icon-512.png','icon-maskable.png','apple-touch-icon.png']) copyFileSync(f,'public/'+f);
+mkdirSync('public/fonts');for(const f of readdirSync('fonts')) copyFileSync('fonts/'+f,'public/fonts/'+f);
 mkdirSync('dist',{recursive:true});
-writeFileSync('dist/claude-artifact.html',base.replace('<!--PWA-->',''));
+writeFileSync('dist/claude-artifact.html',base.replace(FONTS,m=>m.slice(12,-13)).replace('<!--PWA-->',''));
 console.log(`Gebaut: Version ${version}, index.html und sw.js (PWA), public/ (Vercel) sowie dist/claude-artifact.html`);

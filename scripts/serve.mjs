@@ -1,12 +1,20 @@
-// Kleiner lokaler Server für die gebaute Seite im Hauptordner (Kamera und Service Worker brauchen http://localhost oder https)
+// Kleiner lokaler Server für public/, also genau das, was Vercel veröffentlicht (vorher npm run build).
+// Kamera und Service Worker brauchen http://localhost oder https. Standardmäßig nur auf diesem Rechner
+// erreichbar; mit HOST=0.0.0.0 auch im WLAN, etwa zum Testen am Handy.
 import {createServer} from 'node:http';
 import {readFile} from 'node:fs/promises';
-import {extname,join,normalize} from 'node:path';
+import {extname,resolve,sep} from 'node:path';
 const types={'.html':'text/html; charset=utf-8','.js':'text/javascript','.css':'text/css','.png':'image/png','.webmanifest':'application/manifest+json','.json':'application/json'};
-const port=process.env.PORT||8080;
+const root=resolve('public');
+const port=process.env.PORT||8080,host=process.env.HOST||'127.0.0.1';
 createServer(async(req,res)=>{
-  let p=decodeURIComponent(new URL(req.url,'http://x').pathname);if(p.endsWith('/')) p+='index.html';
-  const file=join('.',normalize(p).replace(/^(\.\.[/\\])+/,''));
-  try{const b=await readFile(file);res.writeHead(200,{'Content-Type':types[extname(file)]||'application/octet-stream'});res.end(b);}
-  catch{res.writeHead(404);res.end('Nicht gefunden');}
-}).listen(port,()=>console.log(`Pfeilerl läuft auf http://localhost:${port}`));
+  const fail=(code,text)=>{res.writeHead(code,{'Content-Type':'text/plain; charset=utf-8'});res.end(text);};
+  let p;
+  try{p=decodeURIComponent(new URL(req.url,'http://x').pathname);}catch{return fail(400,'Ungültige Adresse');}
+  if(p.endsWith('/')) p+='index.html';
+  const file=resolve(root,'.'+p);
+  // nur Dateien in public/, keine versteckten Dateien
+  if(!file.startsWith(root+sep)||file.split(sep).some(x=>x.startsWith('.'))) return fail(404,'Nicht gefunden');
+  try{const b=await readFile(file);res.writeHead(200,{'Content-Type':types[extname(file)]||'application/octet-stream','X-Content-Type-Options':'nosniff'});res.end(b);}
+  catch{fail(404,'Nicht gefunden');}
+}).listen(port,host,()=>console.log(`Pfeilerl läuft auf http://localhost:${port}`));
