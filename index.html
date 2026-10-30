@@ -453,7 +453,7 @@ details.more[open]>summary{margin-bottom:10px}
 (function(){
 'use strict';
 // Wird von scripts/build.mjs durch die Version aus package.json ersetzt
-const VERSION='1.3.3'.startsWith('__')?'Entwicklung':'1.3.3';
+const VERSION='1.3.4'.startsWith('__')?'Entwicklung':'1.3.4';
 const SEGS=[20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
 const store={
   get(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}},
@@ -1995,11 +1995,21 @@ function ensureHost(){
   document.body.appendChild(camHost);
   work=document.createElement('canvas');work.width=CW;work.height=CH;wctx=work.getContext('2d',{willReadFrequently:true});
 }
+/* Kamerafehler verständlich erklären, mit Fehlername für die Fehlersuche */
+function camErrText(e){
+  const n=(e&&e.name)||'Unbekannt';
+  if(n==='NotAllowedError'||n==='PermissionDeniedError'||n==='SecurityError') return hasClaude()?
+    `Auf claude.ai blockiert der Browser die Kamera meist. Öffne Pfeilerl dafür unter pfeilerl.vercel.app. (${n})`:
+    `Die Kamera ist nicht erlaubt. Klick links in der Adressleiste auf das Symbol vor der Adresse, stell „Kamera“ auf „Zulassen“ und lade die Seite neu. Unter Windows zusätzlich prüfen: Einstellungen, Datenschutz und Sicherheit, Kamera, dort „Kamerazugriff“ und „Desktop-Apps den Zugriff auf die Kamera erlauben“ einschalten. (${n})`;
+  if(n==='NotFoundError'||n==='OverconstrainedError'||n==='DevicesNotFoundError') return `Keine Kamera gefunden. Prüf das USB-Kabel und ob Windows die Kamera erkennt, etwa in der Kamera-App. (${n})`;
+  if(n==='NotReadableError'||n==='TrackStartError'||n==='AbortError') return `Die Kamera wird gerade von einem anderen Programm benutzt, etwa Autodarts, Teams, Zoom oder der Kamera-App. Schließ es und tipp erneut auf „Kameras suchen“. (${n})`;
+  return `Die Kamera ließ sich nicht starten. (${n})`;
+}
 async function camScan(){
   cam.err='';
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){cam.err='Dieser Browser erlaubt hier keinen Kamerazugriff. Nutze die installierbare Version im Browser am PC.';return;}
   try{const s=await navigator.mediaDevices.getUserMedia({video:true});s.getTracks().forEach(t=>t.stop());}
-  catch(e){cam.err='Kamerazugriff wurde blockiert. Erlaube die Kamera im Browser. Klappt es auf claude.ai nicht, nutze die installierbare Version am PC.';return;}
+  catch(e){cam.err=camErrText(e);return;}
   const all=await navigator.mediaDevices.enumerateDevices();
   cam.devices=all.filter(d=>d.kind==='videoinput').map((d,i)=>({id:d.deviceId,label:d.label||('Kamera '+(i+1))}));
   const ids=cam.devices.map(d=>d.id);
@@ -2019,7 +2029,7 @@ async function camStart(){
       const v=document.createElement('video');v.muted=true;v.playsInline=true;v.autoplay=true;v.srcObject=s;camHost.appendChild(v);
       await v.play().catch(()=>{});
       cam.streams.push(s);cam.videos.push(v);
-    }catch(e){cam.streams.push(null);cam.videos.push(null);cam.err=`Kamera ${i+1} ließ sich nicht starten. Hängen alle drei am selben USB-Anschluss, reicht die Bandbreite oft nicht. Dann einen anderen Port probieren.`;}
+    }catch(e){cam.streams.push(null);cam.videos.push(null);cam.err=e&&e.name==='NotReadableError'?`Kamera ${i+1} ließ sich nicht starten. Hängen alle drei am selben USB-Anschluss, reicht die Bandbreite oft nicht. Dann einen anderen Port probieren, oder ein anderes Programm benutzt sie gerade. (${e.name})`:`Kamera ${i+1}: ${camErrText(e)}`;}
   }
 }
 const calOf=i=>{const id=cam.slots[i];const c=id&&cam.cal[id];return c&&c.p?c:null;};
@@ -2741,7 +2751,7 @@ window.pfeilerlUpdate=()=>{
   document.getElementById('updx').onclick=()=>d.remove();
 };
 
-if(typeof window.__pfeilerlTest==='function') window.__pfeilerlTest({MODES,CATS,checkout,classify,fitCal,triangulate,startGame,throwDart,nextVisit,undo,getGame:()=>game,setup,loadRecords,onlClick,tvClick,profClick,coachClick,drawStats,sv,newAchievements,gameKey,VERSION,dupName,untrusted,validGame,validCode,mergeBackup,quickModes,rememberPlayers,addRegular,localRecs,getOnl:()=>onl,getTv:()=>tv,els:null});
+if(typeof window.__pfeilerlTest==='function') window.__pfeilerlTest({MODES,CATS,checkout,classify,fitCal,triangulate,startGame,throwDart,nextVisit,undo,getGame:()=>game,setup,loadRecords,onlClick,tvClick,profClick,coachClick,drawStats,sv,newAchievements,gameKey,VERSION,dupName,camErrText,untrusted,validGame,validCode,mergeBackup,quickModes,rememberPlayers,addRegular,localRecs,getOnl:()=>onl,getTv:()=>tv,els:null});
 applyTheme();
 renderSetup();
 })();

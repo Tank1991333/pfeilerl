@@ -165,6 +165,13 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
    await fakeDb.doc('online/'+code).set({state:JSON.stringify({g:bad,h:[]}),rev:10000,ts:Date.now()});await sleep(20);
    ok(B.api.getGame().mode==='x01','Kaputter Spielstand vom Gegner wird ignoriert');}
 
+  console.log('Kamera-Fehlermeldungen');
+  {const {api}=env();
+   ok(/Zulassen/.test(api.camErrText({name:'NotAllowedError'}))&&/Windows/.test(api.camErrText({name:'NotAllowedError'})),'Verweigert: Hinweis auf Browser und Windows');
+   ok(/anderen Programm/.test(api.camErrText({name:'NotReadableError'})),'Belegt: Hinweis auf anderes Programm');
+   ok(/Keine Kamera/.test(api.camErrText({name:'NotFoundError'})),'Nicht gefunden: Hinweis auf USB');
+   ok(/\(Seltsam\)/.test(api.camErrText({name:'Seltsam'})),'Unbekannt: Fehlername wird angezeigt');}
+
   console.log('Kamera-Triangulation');
   {const {api}=env();
    const cams=[{a:[0.004,0.0008,0.5],c:[0.0006,0.0011]},{a:[-0.0025,0.0034,0.48],c:[-0.0012,0.0004]},{a:[-0.0016,-0.0036,0.52],c:[0.0009,-0.001]}];
