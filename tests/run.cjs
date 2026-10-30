@@ -216,6 +216,33 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
    ok(!api.fitCal(CAL.map(([X,Y])=>{const [ix,iy]=flat(X,Y);return {X,Y,ix,iy};})).angled,'Flach blickende Kamera wird als flach erkannt');
    ok(api.ncc([1,2,3,4,5],[2,4,6,8,10])>0.99&&api.ncc([1,2,3,4,5],[5,4,3,2,1])<0,'Bildvergleich: Helligkeit egal, Verschiebung erkannt');}
 
+  console.log('Kamera: automatische Kalibrierung');
+  {const {api}=env();
+   const SEGS=[20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
+   // Kamera am Ring wie in echt (Bild-oben mit Anteil zum Spieler hin), Bild 480×270
+   const mk=(ang,dist,h,f,ar)=>{const C=[dist*Math.sin(ang),dist*Math.cos(ang),h],nrm=v=>{const n=Math.hypot(...v);return v.map(x=>x/n);},cr=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+     const Z=nrm([-C[0],-C[1],-C[2]]),X=nrm(cr(Z,[0,0,1])),Y=cr(X,Z);
+     return (px,py)=>{const d=[px-C[0],py-C[1],-C[2]],xc=d[0]*X[0]+d[1]*X[1]+d[2]*X[2],yc=d[0]*Y[0]+d[1]*Y[1]+d[2]*Y[2],zc=d[0]*Z[0]+d[1]*Z[1]+d[2]*Z[2];return [0.5+f*xc/zc,0.5-f*ar*yc/zc];};};
+   const W=480,Hh=270,colOf=(X,Y)=>{const r=Math.hypot(X,Y);if(r>225) return [138,143,150];if(r>200) return [232,232,232];
+     let a=Math.atan2(X,Y)*180/Math.PI;if(a<0)a+=360;const k=Math.floor(((a+9)%360)/18),even=k%2===0;
+     if(r>170){const half=SEGS[k]>=10?4.2:2,off=Math.abs(((a-k*18+540)%360)-180);return r>182&&r<195&&off<half?[242,242,242]:[28,28,28];}
+     if(r<=6.35) return [196,38,44];if(r<=15.9) return [27,117,70];
+     if((r>=99&&r<=107)||r>=162) return even?[196,38,44]:[27,117,70];return even?[31,32,29]:[237,226,196];};
+   let ok3=0;const info=[];
+   for(const g of [17,137,257]){
+     const pr=mk(g*Math.PI/180,260,70,0.62,16/9),T=[[0,170],[170,0],[0,-170],[-170,0]].map(([X,Y])=>{const [u,v]=pr(X,Y);return [u*W,v*Hh];}),Ht=api.acH(T);
+     const data=new Uint8ClampedArray(W*Hh*4);
+     for(let y=0;y<Hh;y++) for(let x=0;x<W;x++){const P=api.invH(Ht,x+0.5,y+0.5),c=P?colOf(P[0],P[1]):[138,143,150],j=(y*W+x)*4;data[j]=c[0];data[j+1]=c[1];data[j+2]=c[2];data[j+3]=255;}
+     const r=api.autoCalibrate({width:W,height:Hh,data});
+     if(!r.ok){info.push('nicht gefunden');continue;}
+     // Fehler in mm auf dem Board bei der wahrscheinlichsten Lage, und ob die richtige unter den Kandidaten ist
+     const errOf=pts=>{const H=api.acH([1,2,3,4].map(k=>[pts[k].ix*W,pts[k].iy*Hh]));let mx=0;for(let X=-150;X<=150;X+=30) for(let Y=-150;Y<=150;Y+=30){if(Math.hypot(X,Y)>170) continue;const [u,v]=api.projH(Ht,X,Y),Q=api.invH(H,u,v);mx=Math.max(mx,Math.hypot(Q[0]-X,Q[1]-Y));}return mx;};
+     const best=Math.min(...r.alts.map(errOf)),first=errOf(r.pts);
+     info.push(`max ${best.toFixed(1)} mm${first<10?'':' (erst nach Würfen)'}${r.sure?', sicher':''}`);
+     if(best<10) ok3++;
+   }
+   ok(ok3===3,'Drei simulierte Kameras ohne Klicken kalibriert, richtige Lage unter den Kandidaten (Würfe klären sie)',info.join(' | '));}
+
   console.log(`\n${passed} bestanden, ${failed} fehlgeschlagen`);
   process.exit(failed?1:0);
 })();

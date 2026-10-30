@@ -462,7 +462,7 @@ details.more[open]>summary{margin-bottom:10px}
 (function(){
 'use strict';
 // Wird von scripts/build.mjs durch die Version aus package.json ersetzt
-const VERSION='1.4.1'.startsWith('__')?'Entwicklung':'1.4.1';
+const VERSION='1.5.0'.startsWith('__')?'Entwicklung':'1.5.0';
 const SEGS=[20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
 const store={
   get(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}},
@@ -2001,9 +2001,9 @@ const CAM_SPEED=[['Sehr langsam',250],['Langsam',180],['Standard',120],['Schnell
 const CAM_STANDBY=[[0,'Nie'],[5,'5 Min.'],[15,'15 Min.'],[30,'30 Min.']];
 let CW=480,CH=270;
 const cam={devices:[],slots:store.get('dart.camslots')||[null,null,null],streams:[],videos:[],cal:store.get('dart.camcal')||{},active:false,state:'idle',ref:[],prev:[],still:0,idle:0,timer:null,pv:null,last:'',err:'',sens:1,calSlot:-1,calPts:[],calImg:null,calFit:null,diag:false,thr:28,margin:0.12,lastP:null,
-  res:0,fps:30,speed:2,standby:15,check:true,mode:null,masks:[],meas:[0,0,0],moved:[false,false,false],sleeping:false,lastAct:Date.now(),sbTimer:null};
+  res:0,fps:30,speed:2,standby:15,check:true,autocal:true,busy:'',mode:null,masks:[],meas:[0,0,0],moved:[false,false,false],sleeping:false,lastAct:Date.now(),sbTimer:null};
 Object.assign(cam,store.get('dart.camset')||{});
-const saveCamSet=()=>store.set('dart.camset',{sens:cam.sens,thr:cam.thr,margin:cam.margin,res:cam.res,fps:cam.fps,speed:cam.speed,standby:cam.standby,check:cam.check});
+const saveCamSet=()=>store.set('dart.camset',{sens:cam.sens,thr:cam.thr,margin:cam.margin,res:cam.res,fps:cam.fps,speed:cam.speed,standby:cam.standby,check:cam.check,autocal:cam.autocal});
 let camHost=null,work=null,wctx=null;
 function ensureHost(){
   if(camHost) return;
@@ -2078,7 +2078,7 @@ async function camStart(){
   const v=cam.videos.find(Boolean);
   if(v){await new Promise(r=>{if(v.videoWidth) r();else{v.onloadedmetadata=()=>r();setTimeout(r,1500);}});if(v.videoWidth) setWork(v.videoWidth/v.videoHeight);}
   clearInterval(cam.sbTimer);cam.sbTimer=setInterval(standbyCheck,30000);
-  if(cam.check) setTimeout(checkMoved,1200);
+  setTimeout(async()=>{if(cam.check||cam.autocal) checkMoved();if(cam.autocal) await camAutoAll(true);},1500);
   if(!fails.length) return;
   const [i,e]=fails[0];
   cam.err=e&&e.name==='NotReadableError'?
@@ -2133,6 +2133,229 @@ function fitCal(pts){
   const err=H?Math.sqrt(pts.reduce((s,q)=>{const [u,v]=projH(H,q.X,q.Y);return s+(u-q.ix)**2+(v-q.iy)**2;},0)/pts.length):null;
   return {p,line:ln,band:[Math.max(0,Math.min(...ys)-0.12),Math.min(1,Math.max(...ys)+0.12)],H,angled:!!(H&&isAngled(H)),err};
 }
+/* ---------- Automatische Kalibrierung ----------
+   Ohne Klicken: 1. rote und grüne Pixel (Double- und Triple-Ring, Bull) suchen, 2. Ellipse an den äußeren
+   Farbring legen, 3. Board-Modell (Farben je Segment) über die Homographie bestmöglich einpassen,
+   4. die Lage der 20 an den Zahlen erkennen: ein- und zweistellige Zahlen wechseln sich am Rand in einer
+   eindeutigen Reihenfolge ab (nur 10/15 und 11/14 stehen zweistellig nebeneinander).
+   Arbeitet auf einem RGBA-Bild (ImageData-ähnlich: {width,height,data}). */
+const DIGITS=SEGS.map(s=>s>=10?1:0);
+function acSamples(){
+  const S=[],add=(r,deg,t,w)=>{const a=deg*Math.PI/180;S.push([r*Math.sin(a),r*Math.cos(a),t,w]);};
+  for(let k=0;k<20;k++){
+    const even=k%2===0;// 20 und jedes zweite Segment: Double/Triple rot, Single schwarz
+    for(const o of [-5,0,5]){
+      add(166,k*18+o,even?'R':'G',2);add(103,k*18+o,even?'R':'G',2);
+      for(const r of [40,70,125,148]) add(r,k*18+o,even?'D':'L',1);
+      // direkt neben den Ringen: dort darf keine Farbe sein, das legt die Ringe genau fest
+      for(const r of [95,111,158]) add(r,k*18+o,even?'D':'L',1.5);
+      add(175,k*18+o,'D',1.5);
+    }
+  }
+  for(let k=0;k<8;k++) add(11,k*45,'G',2);
+  add(0,0,'R',2);
+  return S;
+}
+const AC_SAMPLES=acSamples();
+function acPix(img,x,y){
+  const xi=Math.round(x),yi=Math.round(y);if(xi<0||yi<0||xi>=img.width||yi>=img.height) return null;
+  const j=(yi*img.width+xi)*4;return [img.data[j],img.data[j+1],img.data[j+2]];
+}
+/* Passt das Board-Modell unter H (Board mm → Bildpixel) zum Bild? Höher ist besser, ungefähr −1 bis 1 */
+function acScore(img,Hpx){
+  let s=0,n=0;
+  for(const [X,Y,t,w] of AC_SAMPLES){
+    const [u,v]=projH(Hpx,X,Y),p=acPix(img,u,v);n+=w;if(!p){s-=0.1*w;continue;}
+    const [r,g,b]=p,br=(r+g+b)/765;
+    const red=(r-Math.max(g,b))/255,green=(g-Math.max(r,b*0.85))/255;
+    const sat=Math.max(0,red,green);
+    s+=w*(t==='R'?red-Math.max(0,green):t==='G'?green-Math.max(0,red):t==='D'?0.45-br-sat:br-0.45-sat);
+  }
+  return s/n;
+}
+/* Homographie aus vier Bildpunkten der Board-Punkte oben, rechts, unten, links (je 170 mm) */
+const AC_REF=[[0,170],[170,0],[0,-170],[-170,0]];
+const acH=Q=>fitH(AC_REF.map(([X,Y],k)=>({X,Y,ix:Q[k][0],iy:Q[k][1]})));
+/* Rote (1) und grüne (2), kräftig gesättigte Pixel; der äußerste Bildrand (Rahmen, Raum) zählt nicht */
+function acColorMask(img){
+  const W=img.width,Hh=img.height,d=img.data,col=new Uint8Array(W*Hh);let n=0;
+  const mgx=Math.round(W*0.012)+2,mgy=Math.round(Hh*0.012)+2;
+  for(let y=mgy;y<Hh-mgy;y++) for(let x=mgx;x<W-mgx;x++){
+    const j=(y*W+x)*4,r=d[j],g=d[j+1],b=d[j+2],mx=Math.max(r,g,b),mn=Math.min(r,g,b);
+    if(mx<45||mx-mn<40) continue;
+    if(r===mx&&r>g*1.45&&r>b*1.3){col[y*W+x]=1;n++;}else if(g===mx&&g>r*1.25&&g>b*1.05){col[y*W+x]=2;n++;}
+  }
+  return {col,n,W,H:Hh};
+}
+/* Zusammenhängende Farbflächen (4er-Nachbarschaft) mit Größe, Schwerpunkt und Rahmen */
+function acComponents(M){
+  const {col,W,H}=M,lab=new Int32Array(W*H).fill(-1),comps=[],st=[];
+  for(let k=0;k<W*H;k++){
+    if(!col[k]||lab[k]>=0) continue;
+    const c={kind:col[k],n:0,sx:0,sy:0,x0:W,x1:0,y0:H,y1:0};lab[k]=comps.length;st.push(k);
+    while(st.length){const q=st.pop(),x=q%W,y=(q/W)|0;c.n++;c.sx+=x;c.sy+=y;if(x<c.x0)c.x0=x;if(x>c.x1)c.x1=x;if(y<c.y0)c.y0=y;if(y>c.y1)c.y1=y;
+      for(const nb of [q-1,q+1,q-W,q+W]){if(nb<0||nb>=W*H||lab[nb]>=0||col[nb]!==c.kind) continue;if((nb===q-1||nb===q+1)&&((nb/W)|0)!==y) continue;lab[nb]=comps.length;st.push(nb);}}
+    c.cx=c.sx/c.n;c.cy=c.sy/c.n;comps.push(c);
+  }
+  return comps;
+}
+/* Zweiter Startweg ohne die ferne Board-Seite: Bull (grüner Ring mit rotem Kern), nächster Board-Punkt
+   (weitester Farbpunkt vom Bull) und die seitlich äußersten Farbpunkte. Liefert Bildpunkte für Bull, nah, links, rechts. */
+function acExtremes(M){
+  const comps=acComponents(M).filter(c=>c.n>=4);
+  const big=comps.filter(c=>c.n>=12);if(big.length<4) return null;
+  // Bull: grüne Fläche, die in allen Richtungen von Ringteilen umgeben ist (Teile der äußeren Ringe haben
+  // nach außen nichts mehr um sich); ein roter Kern darin zählt extra
+  const {col,W,H}=M;let bull=null;
+  for(const g of comps){
+    if(g.kind!==2||g.n<5||g.n>M.n*0.08) continue;
+    const sz=Math.max(g.x1-g.x0,g.y1-g.y0,3);let cov=0;
+    for(let k=0;k<16;k++){const dx=Math.cos(k*Math.PI/8),dy=Math.sin(k*Math.PI/8);
+      for(let t=sz*2;;t++){const x=Math.round(g.cx+dx*t),y=Math.round(g.cy+dy*t);if(x<0||y<0||x>=W||y>=H) break;if(col[y*W+x]){cov++;break;}}}
+    const core=comps.some(r=>r.kind===1&&r.cx>g.x0&&r.cx<g.x1&&r.cy>g.y0&&r.cy<g.y1&&r.n<g.n*1.5);
+    const sc=cov+(core?3:0);
+    if(cov>=13&&(!bull||sc>bull.sc||(sc===bull.sc&&g.n>bull.n))) bull={x:g.cx,y:g.cy,sc,n:g.n};
+  }
+  if(!bull) return null;
+  // nur Flächen, die zu den Ringen gehören: Abstand vom Bull nicht extrem
+  const pts=[];big.forEach(c=>{for(let y=c.y0;y<=c.y1;y++) for(let x=c.x0;x<=c.x1;x++) if(M.col[y*M.W+x]) pts.push([x,y,Math.hypot(x-bull.x,y-bull.y)]);});
+  const ds=pts.map(p=>p[2]).sort((a,b)=>a-b),lim=ds[(ds.length*0.97)|0]*1.15;
+  const ring=pts.filter(p=>p[2]<=lim);if(ring.length<50) return null;
+  const near=ring.reduce((a,p)=>p[2]>a[2]?p:a);
+  const nx=(near[0]-bull.x)/near[2],ny=(near[1]-bull.y)/near[2],rx=ny,ry=-nx;// "rechts" quer zur Blickrichtung
+  const along=p=>(p[0]-bull.x)*rx+(p[1]-bull.y)*ry;
+  const right=ring.reduce((a,p)=>along(p)>along(a)?p:a),left=ring.reduce((a,p)=>along(p)<along(a)?p:a);
+  return {bull:[bull.x,bull.y],near:[near[0],near[1]],left:[left[0],left[1]],right:[right[0],right[1]]};
+}
+/* Startwert aus acExtremes: Bull auf (0,0), nah auf 170 mm Richtung psi+180°, links/rechts quer dazu */
+function acInitExt(X,psi){
+  const pts=[[0,0,X.bull],[0,-170,X.near],[-170,0,X.left],[170,0,X.right]].map(([bx,by,im])=>{const c=Math.cos(psi),s=Math.sin(psi);return {X:bx*c+by*s,Y:-bx*s+by*c,ix:im[0],iy:im[1]};});
+  const H=fitH(pts);return H?AC_REF.map(([X0,Y0])=>projH(H,X0,Y0)):null;
+}
+function acFindEllipse(img){
+  const M=acColorMask(img),W=img.width,Hh=img.height,col=M.col,pts=[];
+  if(M.n<200) return null;
+  // Mittelpunkt robust: Median der Farbpixel
+  const xs=[],ys=[];for(let k=0;k<col.length;k++) if(col[k]){xs.push(k%W);ys.push((k/W)|0);}
+  xs.sort((a,b)=>a-b);ys.sort((a,b)=>a-b);let cx=xs[xs.length>>1],cy=ys[ys.length>>1];
+  for(let it=0;it<3;it++){
+    pts.length=0;
+    for(let a=0;a<360;a+=2){
+      const dx=Math.cos(a*Math.PI/180),dy=Math.sin(a*Math.PI/180);let far=null;
+      for(let t=4;;t++){const x=Math.round(cx+dx*t),y=Math.round(cy+dy*t);if(x<0||y<0||x>=W||y>=Hh) break;if(col[y*W+x]) far=[x,y,t];}
+      if(far) pts.push(far);
+    }
+    if(pts.length<40) return null;
+    const rs=pts.map(p=>p[2]).sort((a,b)=>a-b),med=rs[rs.length>>1];
+    // Randpunkt muss zu den Nachbarstrahlen passen (gleitender Median über ±15°), Ausreißer wie Logos fallen weg
+    const loc=pts.map((p,k)=>{const nb=[];for(let o=-7;o<=7;o++) nb.push(pts[(k+o+pts.length)%pts.length][2]);nb.sort((a,b)=>a-b);return nb[7];});
+    let keep=pts.filter((p,k)=>p[2]>med*0.5&&p[2]<med*1.6&&Math.abs(p[2]-loc[k])<=Math.max(4,loc[k]*0.08));
+    let E=null;
+    for(let rep=0;rep<3&&keep.length>=12;rep++){
+      E=fitEllipse(keep);if(!E) return null;
+      const res=keep.map(p=>Math.abs(ellRes(E,p[0],p[1])));const sr=res.slice().sort((a,b)=>a-b),lim=Math.max(0.03,sr[(sr.length*0.8)|0]*1.5);
+      keep=keep.filter((p,k)=>res[k]<=lim);
+    }
+    if(!E) return null;
+    if(Math.hypot(E.cx-cx,E.cy-cy)<1){cx=E.cx;cy=E.cy;return E;}
+    cx=E.cx;cy=E.cy;
+  }
+  return fitEllipse(pts);
+}
+/* Kegelschnitt Ax²+Bxy+Cy²+Dx+Ey=1 nach kleinsten Quadraten, dann Mitte, Halbachsen und Winkel */
+function fitEllipse(pts){
+  const m=pts.reduce((s,p)=>[s[0]+p[0],s[1]+p[1]],[0,0]).map(v=>v/pts.length),sc=100;
+  const P=lsq(pts.map(([x,y])=>{x=(x-m[0])/sc;y=(y-m[1])/sc;return [x*x,x*y,y*y,x,y];}),pts.map(()=>1));
+  if(!P) return null;
+  const [A,B,C,D,E]=P,det=4*A*C-B*B;if(det<=0) return null;
+  const x0=(B*E-2*C*D)/det,y0=(B*D-2*A*E)/det,K=1+(A*x0*x0+B*x0*y0+C*y0*y0);
+  const tr=A+C,df=Math.sqrt((A-C)**2+B*B),l1=(tr+df)/2,l2=(tr-df)/2;if(l2<=0||K<=0) return null;
+  const phi=0.5*Math.atan2(B,A-C);// Richtung der kleinen Achse (größerer Eigenwert l1)
+  return {cx:m[0]+x0*sc,cy:m[1]+y0*sc,a:Math.sqrt(K/l2)*sc,b:Math.sqrt(K/l1)*sc,phi:phi+Math.PI/2,P,m,sc};
+}
+function ellRes(E,x,y){const u=(x-E.m[0])/E.sc,v=(y-E.m[1])/E.sc,[A,B,C,D,F]=E.P;return A*u*u+B*u*v+C*v*v+D*u+F*v-1;}
+/* Startwert aus der Ellipse des Board-Rands. Alle Abbildungen, die den Rand-Kreis auf diese Ellipse legen,
+   unterscheiden sich nur noch darin, wohin der Bull fällt (Punkt px,py im Einheitskreis, Perspektive) und
+   um wie viel das Board gedreht ist (psi). acInit liefert dazu die Bildpunkte von AC_REF (Bild-y nach unten). */
+function acInit(E,psi,px=0,py=0){
+  const ca=Math.cos(E.phi),sa=Math.sin(E.phi),cp=Math.cos(psi),sp=Math.sin(psi);
+  // Kreis-erhaltende Abbildung, die den Mittelpunkt nach (px,py) schiebt (Lorentz-Boost entlang der Richtung)
+  const r=Math.hypot(px,py),dx=r?px/r:1,dy=r?py/r:0,bt=Math.atanh(Math.min(r,0.95)),ch=Math.cosh(bt),sh=Math.sinh(bt);
+  return AC_REF.map(([X,Y])=>{
+    const x=X/170,y=-Y/170,xr=cp*x-sp*y,yr=sp*x+cp*y;
+    const s1=xr*dx+yr*dy,s2=-xr*dy+yr*dx,w=sh*s1+ch,t1=(ch*s1+sh)/w,t2=s2/w;
+    const xb=t1*dx-t2*dy,yb=t1*dy+t2*dx,u=E.a*xb,v=E.b*yb;
+    return [E.cx+ca*u-sa*v,E.cy+sa*u+ca*v];
+  });
+}
+function acRefine(img,Q,steps){
+  let H=acH(Q),best=H?acScore(img,H):-9;
+  for(const st of steps){
+    let improved=true,guard=0;
+    while(improved&&guard++<30){
+      improved=false;
+      for(let k=0;k<4;k++) for(let c=0;c<2;c++) for(const sg of [1,-1]){
+        const T=Q.map(q=>q.slice());T[k][c]+=sg*st;const H2=acH(T);if(!H2) continue;const s=acScore(img,H2);
+        if(s>best+1e-6){best=s;Q=T;H=H2;improved=true;}
+      }
+    }
+  }
+  return {Q,H,score:best};
+}
+/* Drehung um j·18° um den Bull: Board-Punkt erst drehen, dann abbilden */
+function acRotQ(H,deg){
+  const a=deg*Math.PI/180;
+  return AC_REF.map(([X,Y])=>projH(H,X*Math.cos(a)+Y*Math.sin(a),-X*Math.sin(a)+Y*Math.cos(a)));
+}
+/* Helligkeit im Zahlenring je Segment, verglichen mit dem Muster ein-/zweistellig */
+function acDigitCorr(img,H){
+  const w=[],g=[];
+  const P=(r,deg)=>{const a=deg*Math.PI/180;return projH(H,r*Math.sin(a),r*Math.cos(a));};
+  for(let k=0;k<20;k++){
+    let s=0,n=0;
+    for(let o=-7;o<=7;o+=1.5) for(const r of [181,186,191,196]){
+      const [u,v]=P(r,k*18+o),p=acPix(img,u,v);
+      if(p){const mx=Math.max(...p),mn=Math.min(...p);s+=mx>140&&mx-mn<70?1:0;n++;}
+    }
+    // Gewicht: Fläche des Zahlenfelds im Bild in Pixeln, nahe Zahlen sind groß und zuverlässig
+    const [a1,a2]=P(188,k*18-9),[b1,b2]=P(188,k*18+9),[c1,c2]=P(181,k*18),[d1,d2]=P(196,k*18);
+    w.push(n>=20?s/n:null);g.push(Math.hypot(a1-b1,a2-b2)*Math.hypot(c1-d1,c2-d2));
+  }
+  const idx=w.map((v,k)=>v==null?-1:k).filter(k=>k>=0);if(idx.length<10) return {corr:0,w};
+  const G=idx.reduce((s,k)=>s+g[k],0)||1,mw=idx.reduce((s,k)=>s+g[k]*w[k],0)/G,md=idx.reduce((s,k)=>s+g[k]*DIGITS[k],0)/G;
+  let s=0,a=0,b=0;idx.forEach(k=>{const x=w[k]-mw,y=DIGITS[k]-md;s+=g[k]*x*y;a+=g[k]*x*x;b+=g[k]*y*y;});
+  return {corr:a&&b?s/Math.sqrt(a*b):0,w};
+}
+/* Ganze Erkennung. Gibt H in relativen Bildkoordinaten (0 bis 1) zurück, dazu Güte und Sicherheit der Drehung */
+function autoCalibrate(img){
+  const E=acFindEllipse(img),X=acExtremes(acColorMask(img));
+  if(!E&&!X) return {ok:false,why:'Kein Board gefunden. Sind die roten und grünen Ringe gut zu sehen?'};
+  // Suche: Lage des Bulls im Einheitskreis (Raster) und Drehung in 3°-Schritten. Die Farben wiederholen sich
+  // alle 36°, deshalb genügt 0 bis 33°; welche der zehn Möglichkeiten die 20 ist, klären danach die Zahlen.
+  const cand=[];
+  if(E) for(let px=-0.8;px<=0.81;px+=0.1) for(let py=-0.8;py<=0.81;py+=0.1){
+    if(px*px+py*py>0.7) continue;
+    for(let d=0;d<36;d+=3){const Q=acInit(E,d*Math.PI/180,px,py),H=acH(Q);if(H) cand.push({Q,score:acScore(img,H)});}
+  }
+  // zweiter Startweg über Bull, nächsten Punkt und Seiten, für jede Drehung
+  const extC=[];
+  if(X) for(let d=0;d<360;d+=3){const Q=acInitExt(X,d*Math.PI/180),H=Q&&acH(Q);if(H) extC.push({Q,score:acScore(img,H)});}
+  cand.sort((a,b)=>b.score-a.score);extC.sort((a,b)=>b.score-a.score);
+  let best=null;
+  for(const c of cand.slice(0,3).concat(extC.slice(0,3))){const r=acRefine(img,c.Q,[4,2,1,0.5]);if(!best||r.score>best.score) best=r;}
+  if(!best||best.score<0.12) return {ok:false,why:'Board nur unsicher erkannt. Licht prüfen, Darts aus dem Board nehmen oder von Hand kalibrieren.',score:best&&best.score};
+  // Farben wiederholen sich alle 36°: die Zahlen entscheiden, wo die 20 liegt
+  const rots=[];for(let j=0;j<10;j++){const Q=acRotQ(best.H,j*36),H=acH(Q);if(H) rots.push({Q,H,...acDigitCorr(img,H)});}
+  rots.sort((a,b)=>b.corr-a.corr);
+  const top=rots[0],margin=top.corr-(rots[1]?rots[1].corr:0);
+  const fin=acRefine(img,top.Q,[0.5,0.25]);
+  const W=img.width,Hh=img.height,ptsOf=H=>CAL_PTS.map(([,X,Y])=>{const [u,v]=projH(H,X,Y);return {X,Y,ix:u/W,iy:v/Hh};});
+  const pts=ptsOf(fin.H);
+  // alle zehn möglichen Lagen der 20, die wahrscheinlichste zuerst; ist sie unsicher, klären die ersten Würfe (locate)
+  const alts=[pts].concat(rots.slice(1).map(r=>ptsOf(r.H)));
+  return {ok:true,pts,alts,altCorr:rots.map(r=>r.corr),score:fin.score,corr:top.corr,margin,sure:top.corr>0.35&&margin>0.12};
+}
+
 /* Kalibrierung gilt nur fürs selbe Seitenverhältnis (Punkte sind relativ zur Bildgröße gespeichert) */
 const calOf=i=>{const id=cam.slots[i];const c=id&&cam.cal[id];if(!c||!c.p) return null;const ar=camAR(i);if(ar&&Math.abs(ar-(c.ar||4/3))>0.05) return null;return c;};
 const calStale=i=>{const id=cam.slots[i];const c=id&&cam.cal[id];const ar=camAR(i);return !!(c&&c.p&&ar&&Math.abs(ar-(c.ar||4/3))>0.05);};
@@ -2210,12 +2433,65 @@ function triangulate(lines){
 /* Aus den Spitzen aller Kameras einen Board-Punkt bestimmen: je Kamera liefert die x-Position eine Gerade
    auf dem Board (gilt für flache und schräge Kameras), mehrere Geraden ergeben den Schnittpunkt.
    Sieht nur eine schräge Kamera den Dart, reicht ihre Homographie allein. */
-function locate(tips){
-  const lines=tips.map(({c,t})=>{const [a1,a2,a3,c1,c2]=c.p;return [a1-t.x*c1,a2-t.x*c2,t.x-a3];});
-  const P=triangulate(lines);if(P) return P;
+const lineOf=(c,t)=>{const [a1,a2,a3,c1,c2]=c.p;return [a1-t.x*c1,a2-t.x*c2,t.x-a3];};
+const lineDist=(l,P)=>Math.abs(l[0]*P[0]+l[1]*P[1]-l[2])/(Math.hypot(l[0],l[1])||1);
+/* Kandidaten je Kamera: von Hand oder durch Würfe bestätigt nur eine, sonst alle zehn Drehungen */
+const altCache=new WeakMap();
+function candOf(c){
+  if(!Array.isArray(c.alts)||c.alts.length<2) return [c];
+  if(!altCache.has(c)) altCache.set(c,c.alts.map(pts=>Object.assign({},c,fitCal(pts),{pts})));
+  return altCache.get(c);
+}
+let lastChoice=null;
+function locateOne(tips){
+  const P=triangulate(tips.map(({c,t})=>lineOf(c,t)));if(P) return P;
   const one=tips.find(({c})=>c.angled&&c.H);
   if(one){const Q=invH(one.c.H,one.t.x,one.t.y);if(Q&&Math.hypot(Q[0],Q[1])<=260) return Q;}
   return null;
+}
+/* Lage der 20 für unsichere Kameras über mehrere Würfe klären: Für jede Kombination der Drehungen wird
+   aufsummiert, wie schlecht sich die Geraden aller Kameras in einem Punkt treffen (mm²). Die richtige
+   Kombination bleibt bei jedem Wurf nahe null. Die Zahlenerkennung gibt ein leichtes Vorwissen. */
+const rotAcc={key:'',sums:new Map(),n:0};
+function locate(tips){
+  lastChoice=null;
+  const opts=tips.map(({c})=>candOf(c));
+  if(opts.every(o=>o.length===1)) return locateOne(tips);
+  const sure=tips.filter((tp,i)=>opts[i].length===1);
+  if(tips.length<3) return sure.length?locateOne(sure):locateOne(tips);
+  const key=tips.map(({c},i)=>opts[i].length>1?(c.pts[0].ix.toFixed(4)):'s').join('|');
+  if(rotAcc.key!==key){rotAcc.key=key;rotAcc.sums=new Map();rotAcc.n=0;}
+  const prior=ch=>tips.reduce((s,{c},i)=>s+(opts[i].length>1&&c.altCorr?25*Math.max(0,c.altCorr[0]-c.altCorr[ch[i]]):0),0);
+  let best=null;const now=[];
+  const rec=(k,ch)=>{
+    if(k===tips.length){
+      const ls=tips.map((tp,i)=>lineOf(opts[i][ch[i]],tp.t)),P=triangulate(ls);
+      const r2=P?ls.reduce((s,l)=>s+lineDist(l,P)**2,0)/ls.length:400;
+      const id=ch.join(','),tot=(rotAcc.sums.get(id)||0)+Math.min(r2,400);now.push([id,tot]);
+      const cost=tot+prior(ch);if(P&&(!best||cost<best.cost)) best={P,cost,ch:ch.slice(),id};return;}
+    for(let j=0;j<opts[k].length;j++){ch[k]=j;rec(k+1,ch);}
+  };
+  rec(0,[]);
+  // Würfe nah am Bull sagen über die Drehung nichts, sie zählen gleich für alle Kombinationen
+  now.forEach(([id,tot])=>rotAcc.sums.set(id,tot));rotAcc.n++;
+  if(!best) return sure.length?locateOne(sure):null;
+  const costs=[...rotAcc.sums.entries()].map(([id,t])=>t).sort((a,b)=>a-b);
+  lastChoice={tips,ch:best.ch,n:rotAcc.n,best:costs[0],second:costs[1]==null?Infinity:costs[1]};
+  return best.P;
+}
+/* Nach mindestens drei Würfen mit klarem Vorsprung wird die Lage übernommen */
+function voteRotation(){
+  const L=lastChoice;
+  if(!L||L.n<3||!(L.second>Math.max(4*L.best,40*L.n/3))) return '';
+  let done=false;
+  L.tips.forEach(({c},i)=>{
+    if(!Array.isArray(c.alts)) return;
+    const wasUnsure=c.unsure||L.ch[i]!==0;
+    const j=L.ch[i],pts=c.alts[j];
+    Object.assign(c,fitCal(pts),{pts,unsure:false});delete c.alts;delete c.altCorr;if(wasUnsure) done=true;
+  });
+  rotAcc.key='';cam.masks=[];store.set('dart.camcal',cam.cal);
+  return done?'Lage der 20 durch die Würfe geklärt':'';
 }
 const camAllowed=()=>!!game&&!game.winner&&!isBotTurn()&&canAct();
 function camTick(){
@@ -2257,8 +2533,8 @@ function camTick(){
     const P=locate(tips);
     if(P){
       cam.lastP=P;drawMiniBoard();
-      const d=classify(P[0],-P[1]);
-      cam.last='Erkannt: '+(d.mult?label(d):'daneben');
+      const d=classify(P[0],-P[1]),note=voteRotation();
+      cam.last='Erkannt: '+(d.mult?label(d):'daneben')+(note?', '+note:'');
       if(camAllowed()) throwDart(d);
     }else cam.last='Dart nicht eindeutig erkannt, bitte per Taste eingeben';
     resetRef();
@@ -2367,6 +2643,48 @@ function calClick(e){
   }
   renderCam();
 }
+/* Standbild in 640 Pixel Breite für die automatische Kalibrierung */
+function frameImage(i){
+  const v=cam.videos[i];if(!v||v.readyState<2||!v.videoWidth) return null;
+  const w=640,h=Math.round(640*v.videoHeight/v.videoWidth),c=document.createElement('canvas');c.width=w;c.height=h;
+  const x=c.getContext('2d',{willReadFrequently:true});x.drawImage(v,0,0,w,h);return x.getImageData(0,0,w,h);
+}
+function camAutoCal(i){
+  const img=frameImage(i);if(!img) return {ok:false,why:'Kein Kamerabild.'};
+  const r=autoCalibrate(img);if(!r.ok) return r;
+  const fit=fitCal(r.pts);if(!fit.p||!fit.H) return {ok:false,why:'Die Kalibrierung ging nicht auf.'};
+  // Lage der 20 aus den Zahlen ist nur ein Vorschlag: die ersten Würfe bestätigen oder korrigieren sie (locate)
+  cam.cal[cam.slots[i]]=Object.assign({pts:r.pts,ar:img.width/img.height,thumb:thumbOf(i),auto:true,unsure:!r.sure,alts:r.alts,altCorr:r.altCorr},fit);
+  store.set('dart.camcal',cam.cal);cam.masks=[];cam.moved[i]=false;cam.ref=[];cam.prev=[];
+  return r;
+}
+/* Alle Kameras nacheinander; onlyNeeded: nur nicht kalibrierte oder verrutschte */
+async function camAutoAll(onlyNeeded){
+  const todo=[0,1,2].filter(i=>cam.videos[i]&&(!onlyNeeded||!calOf(i)||cam.moved[i]));
+  if(!todo.length) return;
+  const msg=[];
+  for(const i of todo){
+    cam.busy=`Kalibriere Kamera ${i+1} …`;if(document.getElementById('camprev0')) renderCam();
+    await new Promise(r=>setTimeout(r,30));
+    const r=camAutoCal(i);
+    msg.push(r.ok?`Kamera ${i+1} kalibriert${r.sure?'':', Lage der 20 klären die ersten Würfe'}`:`Kamera ${i+1}: ${r.why}`);
+  }
+  cam.busy='';cam.last=msg.join('. ');
+  if(document.getElementById('camprev0')||document.querySelector('.camgrid')) renderCam();
+}
+/* Rohbilder aller Kameras als PNG herunterladen, etwa um sie für die Fehlersuche weiterzugeben */
+async function camSaveImages(){
+  const day=new Date().toISOString().slice(0,16).replace(/[:T]/g,'-');let n=0;
+  for(let i=0;i<3;i++){
+    const v=cam.videos[i];if(!v||v.readyState<2) continue;
+    const c=document.createElement('canvas');c.width=v.videoWidth;c.height=v.videoHeight;c.getContext('2d').drawImage(v,0,0);
+    const blob=await new Promise(r=>c.toBlob(r,'image/png'));if(!blob) continue;
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`pfeilerl-kamera${i+1}-${day}.png`;
+    document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),2000);n++;
+    await new Promise(r=>setTimeout(r,400));
+  }
+  cam.last=n?`${n} Kamerabilder gespeichert (Download-Ordner)`:'Keine Kamerabilder verfügbar';
+}
 function calSave(){
   const i=cam.calSlot,fit=cam.calFit;if(i<0||!fit) return;
   cam.cal[cam.slots[i]]=Object.assign({pts:cam.calPts,ar:cam.calImg.width/cam.calImg.height,thumb:thumbOf(i)},fit);
@@ -2392,32 +2710,36 @@ function renderCam(){
   }
   const slots=cam.devices.length?[0,1,2].map(i=>{
     const ok=!!calOf(i),stale=calStale(i);
-    return `<div class="camslot"><div class="camhead"><b>Kamera ${i+1}</b><span class="${ok?'okc':'muted'}">${ok?(calOf(i).angled?'kalibriert, schräg':'kalibriert, flach'):stale?'neu kalibrieren':'nicht kalibriert'}</span></div>
+    const cc=calOf(i);
+    return `<div class="camslot"><div class="camhead"><b>Kamera ${i+1}</b><span class="${ok?'okc':'muted'}">${ok?(cc.auto?'automatisch kalibriert':'kalibriert')+(cc.angled?', schräg':', flach'):stale?'neu kalibrieren':'nicht kalibriert'}</span></div>
     <canvas id="camprev${i}" class="camprev" width="${CW}" height="${CH}" aria-label="Vorschau Kamera ${i+1}"></canvas>
     <p class="muted small camfps" id="camfps${i}"></p>
     ${cam.moved[i]?'<p class="err small">Das Bild weicht stark von der Kalibrierung ab. Wurde die Kamera bewegt? Bitte das Raster prüfen und neu kalibrieren.</p>':''}
     ${stale?'<p class="muted small">Die Auflösung hat ein anderes Seitenverhältnis als bei der Kalibrierung.</p>':''}
+    ${ok&&cc.unsure?'<p class="warnt small">Die Lage der 20 ist noch unsicher. Die ersten Würfe klären das automatisch, dafür sollten alle drei Kameras laufen.</p>':''}
     <label class="olabel" for="camdev${i}">Gerät</label><select id="camdev${i}" class="pinput" data-camdev="${i}"><option value="">Keine Kamera</option>${cam.devices.map((d,j)=>`<option value="${j}" ${cam.slots[i]===d.id?'selected':''}>${esc(d.label)}</option>`).join('')}</select>
     ${cam.diag&&ok?`<p class="diagl" id="camdiag${i}">Diagnose läuft …</p>`:''}
-    <button class="ghost" data-cal="${i}" ${cam.videos[i]?'':'disabled'}>${ok?'Neu kalibrieren':'Kalibrieren'}</button></div>`;}).join(''):'';
+    <div class="addrow"><button class="ghost" data-acal="${i}" ${cam.videos[i]&&!cam.busy?'':'disabled'}>Automatisch</button><button class="ghost" data-cal="${i}" ${cam.videos[i]?'':'disabled'}>Von Hand</button></div></div>`;}).join(''):'';
   const anyFlat=[0,1,2].some(i=>calOf(i)&&!calOf(i).angled);
   app.innerHTML=`<div class="wrap camwide">${hdr}
   <p class="muted">Drei USB-Kameras am Ring rund ums Board, etwa im 120-Grad-Abstand, schräg auf die Scheibe blickend, so wie bei Autodarts. Die Erkennung läuft im Browser am PC. Wichtig: Autodarts und andere Kamera-Programme vorher ganz schließen, eine Kamera kann immer nur ein Programm benutzen. Daneben liegende Würfe korrigierst du mit „Rückgängig“ und den Tasten.</p>
   ${cam.err?`<p class="err" role="alert">${esc(cam.err)}</p>`:''}
   ${cam.sleeping?'<p class="muted">Kameras im Standby, sie starten gleich wieder.</p>':''}
   ${cam.mode&&cam.streams.some(Boolean)?`<p class="muted small">Angefordert: ${camModeText(cam.mode)}${cam.modeStep?', sparsamer wegen knapper USB-Bandbreite':''}.</p>`:''}
-  <button class="ghost" data-act="camscan" style="margin-bottom:14px">${cam.devices.length?'Kameras neu suchen':'Kameras suchen'}</button>
+  ${cam.busy?`<p class="camline" role="status">${esc(cam.busy)}</p>`:''}
+  <div class="addrow" style="margin-bottom:14px"><button class="ghost" data-act="camscan">${cam.devices.length?'Kameras neu suchen':'Kameras suchen'}</button>${cam.devices.length?`<button class="primary" data-act="camautoall" ${cam.busy?'disabled':''}>Alle automatisch kalibrieren</button>`:''}</div>
+  ${cam.devices.length?'<p class="muted small">Zum Kalibrieren alle Darts aus dem Board nehmen. Die App findet Ringe und Zahlen selbst, das grüne Raster zeigt das Ergebnis.</p>':''}
   <div class="camgrid">${slots}</div>
   <section><h2>Kameraeinstellungen</h2>
   <div class="opt"><span class="olabel">Auflösung</span>${segBtns('data-cres',CAM_RES.map((r,k)=>[k,r.n]),cam.res,'Auflösung')}</div>
   <div class="opt"><span class="olabel">Bilder pro Sekunde</span>${segBtns('data-cfps',CAM_FPS.map(f=>[f,String(f)]),cam.fps,'Bilder pro Sekunde')}</div>
   <div class="opt"><span class="olabel">Erkennungsgeschwindigkeit</span>${segBtns('data-cspeed',CAM_SPEED.map((s,k)=>[k,s[0]]),cam.speed,'Erkennungsgeschwindigkeit')}</div>
   <div class="opt"><span class="olabel">Kameras in Standby nach</span>${segBtns('data-cstby',CAM_STANDBY,cam.standby,'Standby')}</div>
-  <div class="opt"><span class="olabel">Beim Start prüfen, ob eine Kamera bewegt wurde</span>${segBtns('data-ccheck',[[false,'Aus'],[true,'An']],cam.check,'Kalibrierung beim Start prüfen')}</div></section>
+  <div class="opt"><span class="olabel">Beim Start automatisch kalibrieren (neue und verrutschte Kameras)</span>${segBtns('data-cauto',[[false,'Aus'],[true,'An']],cam.autocal,'Beim Start automatisch kalibrieren')}</div></section>
   ${cam.devices.length?`<section><h2>Erkennung</h2><div class="opt"><span class="olabel">Empfindlichkeit</span><div class="seg" role="group" aria-label="Empfindlichkeit">${['Niedrig','Mittel','Hoch'].map((n,i)=>`<button data-sens="${i}" class="${cam.sens===i?'on':''}" aria-pressed="${cam.sens===i}">${n}</button>`).join('')}</div></div>
   <div class="opt"><span class="olabel">Helligkeitsschwelle</span><div class="seg" role="group" aria-label="Helligkeitsschwelle">${[[18,'Fein'],[28,'Normal'],[40,'Grob']].map((c,i)=>`<button data-thr="${i}" class="${cam.thr===c[0]?'on':''}" aria-pressed="${cam.thr===c[0]}">${c[1]}</button>`).join('')}</div></div>
   ${anyFlat?`<div class="opt"><span class="olabel">Erkennungsbereich um die Board-Oberfläche (flache Kameras)</span><div class="seg" role="group" aria-label="Erkennungsbereich">${[[0.06,'Schmal'],[0.12,'Mittel'],[0.2,'Breit']].map((c,i)=>`<button data-mg="${i}" class="${cam.margin===c[0]?'on':''}" aria-pressed="${cam.margin===c[0]}">${c[1]}</button>`).join('')}</div></div>`:''}
-  <div class="addrow" style="margin-bottom:12px"><button class="ghost" data-act="camdiag">${cam.diag?'Diagnose aus':'Diagnose an'}</button><button class="ghost" data-act="camref">Referenzbild neu setzen</button></div>
+  <div class="addrow" style="margin-bottom:12px"><button class="ghost" data-act="camdiag">${cam.diag?'Diagnose aus':'Diagnose an'}</button><button class="ghost" data-act="camref">Referenzbild neu setzen</button><button class="ghost" data-act="camsave">Kamerabilder speichern</button></div>
   ${cam.diag?'<p class="muted">Rot zeigt Veränderungen zum Referenzbild im Suchbereich, der gelbe Punkt die gefundene Dartspitze. Ohne Wurf sollte kaum Rot zu sehen sein.</p>':''}
   <button class="primary start" data-act="camtoggle">${cam.active?'Erkennung stoppen':'Erkennung starten'}</button>
   <p class="camline" id="camstat">${esc(cam.last||'Noch kein Wurf erkannt')}</p>
@@ -2428,14 +2750,19 @@ function renderCam(){
 async function camRestart(){camStop();cam.masks=[];cam.ref=[];cam.prev=[];if(cam.devices.length) await camStart();}
 async function camClick(t){
   const a=t.dataset.act;cam.err='';
-  if(a==='cam'){renderCam();window.scrollTo(0,0);return;}
+  if(a==='cam'){renderCam();window.scrollTo(0,0);
+    if(!cam.devices.length&&navigator.permissions&&navigator.permissions.query){try{const st=await navigator.permissions.query({name:'camera'});if(st.state==='granted'){await camScan();renderCam();}}catch(e){}}
+    return;}
   if(a==='camscan'){app.querySelector('[data-act="camscan"]').textContent='Suche …';await camScan();renderCam();return;}
   if(t.dataset.cal!==undefined){cam.calSlot=+t.dataset.cal;cam.calPts=[];cam.calFit=null;calSnap();renderCam();return;}
   if(t.dataset.cres!==undefined){cam.res=+t.dataset.cres;saveCamSet();await camRestart();renderCam();return;}
   if(t.dataset.cfps!==undefined){cam.fps=CAM_FPS[+t.dataset.cfps];saveCamSet();await camRestart();renderCam();return;}
   if(t.dataset.cspeed!==undefined){cam.speed=+t.dataset.cspeed;saveCamSet();if(cam.timer){clearInterval(cam.timer);cam.timer=setInterval(camTick,camTickMs());}renderCam();return;}
   if(t.dataset.cstby!==undefined){cam.standby=CAM_STANDBY[+t.dataset.cstby][0];saveCamSet();renderCam();return;}
-  if(t.dataset.ccheck!==undefined){cam.check=t.dataset.ccheck==='1';saveCamSet();if(cam.check) checkMoved();renderCam();return;}
+  if(t.dataset.cauto!==undefined){cam.autocal=t.dataset.cauto==='1';saveCamSet();if(cam.autocal){checkMoved();await camAutoAll(true);}renderCam();return;}
+  if(t.dataset.acal!==undefined){const i=+t.dataset.acal;cam.busy=`Kalibriere Kamera ${i+1} …`;renderCam();await new Promise(r=>setTimeout(r,30));const r=camAutoCal(i);cam.busy='';cam.last=r.ok?`Kamera ${i+1} automatisch kalibriert${r.sure?'':', Lage der 20 klären die ersten Würfe'}`:`Kamera ${i+1}: ${r.why}`;renderCam();return;}
+  if(a==='camautoall'){await camAutoAll(false);renderCam();return;}
+  if(a==='camsave'){await camSaveImages();renderCam();return;}
   if(t.dataset.sens!==undefined){cam.sens=+t.dataset.sens;saveCamSet();renderCam();return;}
   if(t.dataset.thr!==undefined){cam.thr=[18,28,40][+t.dataset.thr];saveCamSet();renderCam();return;}
   if(t.dataset.mg!==undefined){cam.margin=[0.06,0.12,0.2][+t.dataset.mg];saveCamSet();cam.masks=[];renderCam();return;}
@@ -2920,7 +3247,7 @@ app.addEventListener('click',e=>{
   if(t.dataset.prof!==undefined||t.dataset.jg||t.dataset.preview!==undefined||t.dataset.delset||t.dataset.walk!==undefined||t.dataset.act==='addset'){profClick(t);return;}
   if(['coach','coachai','coachstop','coachlocal','coachfb','coachask'].includes(t.dataset.act)||t.dataset.drill!==undefined||t.dataset.cplayer!==undefined){coachClick(t);return;}
   if(['online','onlcreate','onljoin'].includes(t.dataset.act)||t.dataset.oseat!==undefined||t.dataset.ojseat!==undefined){onlClick(t);return;}
-  if(['cam','camscan','camtoggle','calsnap','calundo','calcancel','calsave','calreset','camdiag','camref'].includes(t.dataset.act)||t.dataset.cal!==undefined||t.dataset.sens!==undefined||t.dataset.thr!==undefined||t.dataset.mg!==undefined||t.dataset.cres!==undefined||t.dataset.cfps!==undefined||t.dataset.cspeed!==undefined||t.dataset.cstby!==undefined||t.dataset.ccheck!==undefined){camClick(t);return;}
+  if(['cam','camscan','camtoggle','calsnap','calundo','calcancel','calsave','calreset','camdiag','camref','camsave'].includes(t.dataset.act)||t.dataset.cal!==undefined||t.dataset.sens!==undefined||t.dataset.thr!==undefined||t.dataset.mg!==undefined||t.dataset.cres!==undefined||t.dataset.cfps!==undefined||t.dataset.cspeed!==undefined||t.dataset.cstby!==undefined||t.dataset.cauto!==undefined||t.dataset.acal!==undefined||t.dataset.act==='camautoall'){camClick(t);return;}
   if(['tour','tourstart','tourend'].includes(t.dataset.act)||t.dataset.tf||t.dataset.play){tourClick(t);return;}
   if(t.dataset.act==='stats'||t.dataset.act==='back'||t.dataset.smode||t.dataset.splayer!==undefined||t.dataset.del||t.dataset.train!==undefined){statsClick(t);return;}
   if(t.dataset.mode){setup.mode=t.dataset.mode;setupErr='';saveSetup();renderSetup();return;}
@@ -2966,7 +3293,7 @@ window.pfeilerlUpdate=()=>{
   document.getElementById('updx').onclick=()=>d.remove();
 };
 
-if(typeof window.__pfeilerlTest==='function') window.__pfeilerlTest({MODES,CATS,checkout,classify,fitCal,triangulate,startGame,throwDart,nextVisit,undo,getGame:()=>game,setup,loadRecords,onlClick,tvClick,profClick,coachClick,drawStats,sv,newAchievements,gameKey,VERSION,dupName,camErrText,CAM_MODES,fitH,projH,invH,isAngled,findTip,locate,ncc,untrusted,validGame,validCode,mergeBackup,quickModes,rememberPlayers,addRegular,localRecs,getOnl:()=>onl,getTv:()=>tv,els:null});
+if(typeof window.__pfeilerlTest==='function') window.__pfeilerlTest({MODES,CATS,checkout,classify,fitCal,triangulate,startGame,throwDart,nextVisit,undo,getGame:()=>game,setup,loadRecords,onlClick,tvClick,profClick,coachClick,drawStats,sv,newAchievements,gameKey,VERSION,dupName,camErrText,CAM_MODES,fitH,projH,invH,isAngled,findTip,locate,ncc,autoCalibrate,fitEllipse,acColorMask,acExtremes,candOf,voteRotation,getLastChoice:()=>lastChoice,acFindEllipse,acScore,acInit,acH,acRefine,acDigitCorr,acRotQ,untrusted,validGame,validCode,mergeBackup,quickModes,rememberPlayers,addRegular,localRecs,getOnl:()=>onl,getTv:()=>tv,els:null});
 applyTheme();
 renderSetup();
 })();
