@@ -808,7 +808,7 @@ function startGame(fromSaved,cfg){
     m.init(game);history=[];saveGame();
     if(!cfg){setup.recent=[mode,...setup.recent.filter(k=>k!==mode)].slice(0,4);rememberPlayers();setupMsg='';saveSetup();}
   }
-  setupErr='';quitArmed=false;
+  setupErr='';quitArmed=false;camWake();
   const m=MODES[game.mode];
   app.innerHTML=`<div class="wrap game">
   <header class="gbar"><div><h1 class="gmode">${m.name}</h1><div class="gsub">${esc(m.sub(game.opts))}${game.online?` <b class="code">Online ${esc(game.online)}</b>`:''}${game.screen?` <b class="code">Bildschirm ${esc(game.screen)}</b>`:''}</div></div><div class="gtools"><button class="ghost" id="tvbtn" aria-label="Großer Bildschirm">📺</button><button class="ghost" id="voice"></button><button class="ghost" id="quit">Beenden</button></div></header>
@@ -846,6 +846,7 @@ function setMod(m){
 
 function throwDart(d,fromBot){
   if(!game||game.winner) return;
+  camTouch();
   if(isBotTurn()&&!fromBot) return;
   if(!fromBot&&!canAct()) return;
   if(game.locked||game.legDone){pulseNext();return;}
@@ -1531,11 +1532,17 @@ async function onlClick(t){
 }
 
 /* ---------- Kamera ---------- */
-const CAL_PTS=[['die Mitte des Bulls',0,0],['den äußeren Draht der Double 20 (oben)',0,170],['den äußeren Draht der Double 6 (rechts)',170,0],['den äußeren Draht der Double 3 (unten)',0,-170],['den äußeren Draht der Double 11 (links)',-170,0]];
-const CW=320,CH=240;
-const cam={devices:[],slots:store.get('dart.camslots')||[null,null,null],streams:[],videos:[],cal:store.get('dart.camcal')||{},active:false,state:'idle',ref:[],prev:[],still:0,idle:0,timer:null,pv:null,last:'',err:'',sens:1,calSlot:-1,calPts:[],calImg:null,diag:false,thr:28,margin:0.12,lastP:null};
+const CAL_PTS=[['die Mitte des Bulls',0,0],['den äußeren Draht der Double 20, in der Mitte des Feldes',0,170],['den äußeren Draht der Double 6, in der Mitte des Feldes',170,0],['den äußeren Draht der Double 3, in der Mitte des Feldes',0,-170],['den äußeren Draht der Double 11, in der Mitte des Feldes',-170,0]];
+/* Auflösungen wie bei Autodarts. Die Kameras liefern dabei meist MJPEG, so passen auch drei an einen USB-Anschluss. */
+const CAM_RES=[{w:1280,h:720,n:'1280×720'},{w:640,h:360,n:'640×360'},{w:640,h:480,n:'640×480 (4:3)'}];
+const CAM_FPS=[30,15];
+const CAM_SPEED=[['Sehr langsam',250],['Langsam',180],['Standard',120],['Schnell',80],['Sehr schnell',50]];
+const CAM_STANDBY=[[0,'Nie'],[5,'5 Min.'],[15,'15 Min.'],[30,'30 Min.']];
+let CW=480,CH=270;
+const cam={devices:[],slots:store.get('dart.camslots')||[null,null,null],streams:[],videos:[],cal:store.get('dart.camcal')||{},active:false,state:'idle',ref:[],prev:[],still:0,idle:0,timer:null,pv:null,last:'',err:'',sens:1,calSlot:-1,calPts:[],calImg:null,calFit:null,diag:false,thr:28,margin:0.12,lastP:null,
+  res:0,fps:30,speed:2,standby:15,check:true,mode:null,masks:[],meas:[0,0,0],moved:[false,false,false],sleeping:false,lastAct:Date.now(),sbTimer:null};
 Object.assign(cam,store.get('dart.camset')||{});
-const saveCamSet=()=>store.set('dart.camset',{sens:cam.sens,thr:cam.thr,margin:cam.margin});
+const saveCamSet=()=>store.set('dart.camset',{sens:cam.sens,thr:cam.thr,margin:cam.margin,res:cam.res,fps:cam.fps,speed:cam.speed,standby:cam.standby,check:cam.check});
 let camHost=null,work=null,wctx=null;
 function ensureHost(){
   if(camHost) return;
@@ -1543,6 +1550,12 @@ function ensureHost(){
   document.body.appendChild(camHost);
   work=document.createElement('canvas');work.width=CW;work.height=CH;wctx=work.getContext('2d',{willReadFrequently:true});
 }
+/* Rechenauflösung passt sich dem Seitenverhältnis der Kameras an, 480 Pixel breit */
+function setWork(ar){
+  const h=Math.round(480/ar);if(h===CH&&CW===480) return;
+  CW=480;CH=h;if(work){work.width=CW;work.height=CH;}cam.masks=[];cam.ref=[];cam.prev=[];
+}
+const camAR=i=>{const v=cam.videos[i];return v&&v.videoWidth?v.videoWidth/v.videoHeight:null;};
 /* Kamerafehler verständlich erklären, mit Fehlername für die Fehlersuche */
 function camErrText(e){
   const n=(e&&e.name)||'Unbekannt';
@@ -1550,7 +1563,7 @@ function camErrText(e){
     `Auf claude.ai blockiert der Browser die Kamera meist. Öffne Pfeilerl dafür unter pfeilerl.vercel.app. (${n})`:
     `Die Kamera ist nicht erlaubt. Klick links in der Adressleiste auf das Symbol vor der Adresse, stell „Kamera“ auf „Zulassen“ und lade die Seite neu. Unter Windows zusätzlich prüfen: Einstellungen, Datenschutz und Sicherheit, Kamera, dort „Kamerazugriff“ und „Desktop-Apps den Zugriff auf die Kamera erlauben“ einschalten. (${n})`;
   if(n==='NotFoundError'||n==='OverconstrainedError'||n==='DevicesNotFoundError') return `Keine Kamera gefunden. Prüf das USB-Kabel und ob Windows die Kamera erkennt, etwa in der Kamera-App. (${n})`;
-  if(n==='NotReadableError'||n==='TrackStartError'||n==='AbortError') return `Die Kamera wird gerade von einem anderen Programm benutzt, etwa Autodarts, Teams, Zoom oder der Kamera-App. Schließ es und tipp erneut auf „Kameras suchen“. (${n})`;
+  if(n==='NotReadableError'||n==='TrackStartError'||n==='AbortError') return `Die Kamera wird gerade von einem anderen Programm benutzt. Läuft Autodarts, Teams, Zoom oder die Kamera-App, schließ es ganz (auch im Infobereich der Taskleiste) und tipp erneut auf „Kameras suchen“. (${n})`;
   return `Die Kamera ließ sich nicht starten. (${n})`;
 }
 async function camScan(){
@@ -1565,42 +1578,119 @@ async function camScan(){
   store.set('dart.camslots',cam.slots);
   await camStart();
 }
-/* Auflösung und Bildrate je Kamera. Die Erkennung rechnet ohnehin mit 320×240 und etwa 8 Bildern/s,
-   mehr kostet nur USB-Bandbreite. Hängen alle Kameras an einem Anschluss, schaltet camStart() stufenweise
-   herunter, bis alle laufen. Seitenverhältnis bleibt 4:3, Kalibrierungen gelten weiter. */
-const CAM_MODES=[{w:320,h:240,f:15},{w:320,h:240,f:10},{w:320,h:240,f:5}];
-const camModeText=m=>`${m.w}×${m.h} Pixel, ${m.f} Bilder pro Sekunde`;
-async function camOpen(m){
+/* Stufen für camStart: gewählte Auflösung und Bildrate, dann sparsamer, falls eine Kamera mit
+   NotReadableError scheitert (USB-Bandbreite knapp oder Kamera belegt). Seitenverhältnis bleibt gleich. */
+function camModes(){
+  const r=CAM_RES[cam.res]||CAM_RES[0],wide=r.w/r.h>1.5,small=wide?{w:640,h:360}:{w:320,h:240};
+  const list=[{w:r.w,h:r.h,f:cam.fps},{w:r.w,h:r.h,f:15},{w:small.w,h:small.h,f:15},{w:small.w,h:small.h,f:10}];
+  return list.filter((m,i)=>list.findIndex(x=>x.w===m.w&&x.h===m.h&&x.f===m.f)===i);
+}
+const CAM_MODES=camModes();
+const camModeText=m=>`${m.w}×${m.h}, ${m.f} Bilder/s`;
+function camStop(){
   cam.streams.forEach(s=>s&&s.getTracks().forEach(t=>t.stop()));
-  cam.streams=[];cam.videos=[];camHost.innerHTML='';
+  cam.streams=[];cam.videos=[];if(camHost) camHost.innerHTML='';
+}
+async function camOpen(m){
+  camStop();
   const fails=[];
   for(let i=0;i<3;i++){
     const id=cam.slots[i];
     if(!id){cam.streams.push(null);cam.videos.push(null);continue;}
     try{
-      const s=await navigator.mediaDevices.getUserMedia({video:{deviceId:{exact:id},width:{ideal:m.w},height:{ideal:m.h},aspectRatio:{ideal:4/3},frameRate:{ideal:m.f}}});
+      const s=await navigator.mediaDevices.getUserMedia({video:{deviceId:{exact:id},width:{ideal:m.w},height:{ideal:m.h},aspectRatio:{ideal:m.w/m.h},frameRate:{ideal:m.f}}});
       const v=document.createElement('video');v.muted=true;v.playsInline=true;v.autoplay=true;v.srcObject=s;camHost.appendChild(v);
       await v.play().catch(()=>{});
-      cam.streams.push(s);cam.videos.push(v);
+      cam.streams.push(s);cam.videos.push(v);countFrames(i,v);
     }catch(e){cam.streams.push(null);cam.videos.push(null);fails.push([i,e]);}
   }
   return fails;
 }
 async function camStart(){
   ensureHost();
-  let fails=[];
-  for(let k=0;k<CAM_MODES.length;k++){
-    fails=await camOpen(CAM_MODES[k]);cam.mode=k;
-    // nur bei Bandbreiten- oder Belegt-Fehlern lohnt eine sparsamere Stufe
+  const modes=camModes();let fails=[];
+  for(let k=0;k<modes.length;k++){
+    fails=await camOpen(modes[k]);cam.mode=modes[k];cam.modeStep=k;
     if(!fails.some(([,e])=>e&&e.name==='NotReadableError')) break;
   }
+  cam.sleeping=false;cam.lastAct=Date.now();
+  const v=cam.videos.find(Boolean);
+  if(v){await new Promise(r=>{if(v.videoWidth) r();else{v.onloadedmetadata=()=>r();setTimeout(r,1500);}});if(v.videoWidth) setWork(v.videoWidth/v.videoHeight);}
+  clearInterval(cam.sbTimer);cam.sbTimer=setInterval(standbyCheck,30000);
+  if(cam.check) setTimeout(checkMoved,1200);
   if(!fails.length) return;
   const [i,e]=fails[0];
   cam.err=e&&e.name==='NotReadableError'?
-    `Kamera ${i+1} startet nicht, auch nicht mit der sparsamsten Einstellung (${camModeText(CAM_MODES[cam.mode])}). Hängen alle Kameras an einem USB-Anschluss, reicht die Bandbreite nicht. Verteile sie auf verschiedene Anschlüsse, am besten einer vorne und einer hinten am PC, oder nutze einen USB-3-Hub mit eigenem Netzteil. Prüf auch, dass kein anderes Programm die Kamera benutzt. (${e.name})`:
+    `Kamera ${i+1} startet nicht, auch nicht mit ${camModeText(cam.mode)}. Meist benutzt ein anderes Programm sie gerade, etwa Autodarts: Das bitte ganz schließen, auch im Infobereich der Taskleiste. Sonst reicht die USB-Bandbreite nicht, dann die Kameras auf verschiedene Anschlüsse verteilen. (${e.name})`:
     `Kamera ${i+1}: ${camErrText(e)}`;
 }
-const calOf=i=>{const id=cam.slots[i];const c=id&&cam.cal[id];return c&&c.p?c:null;};
+/* Gemessene Bildrate je Kamera */
+function countFrames(i,v){
+  let n=0,t0=performance.now();
+  const tick=()=>{if(cam.videos[i]!==v) return;n++;const t=performance.now();if(t-t0>=1000){cam.meas[i]=Math.round(n*1000/(t-t0));n=0;t0=t;}
+    if(v.requestVideoFrameCallback) v.requestVideoFrameCallback(tick);else setTimeout(tick,33);};
+  if(v.requestVideoFrameCallback) v.requestVideoFrameCallback(tick);else setTimeout(tick,33);
+}
+/* Standby: Kameras nach einer Weile ohne Spiel ausschalten, beim nächsten Spiel wieder an */
+const camTouch=()=>{cam.lastAct=Date.now();};
+function standbyCheck(){
+  if(!cam.standby||cam.sleeping||!cam.streams.some(Boolean)) return;
+  if(game&&!game.winner) return;
+  if(Date.now()-cam.lastAct<cam.standby*60000) return;
+  clearInterval(cam.timer);cam.timer=null;camStop();cam.sleeping=true;cam.last='Kameras im Standby, sie starten mit dem nächsten Spiel wieder';
+}
+async function camWake(){
+  if(!cam.sleeping) return;
+  await camStart();
+  if(cam.active){cam.ref=[];cam.prev=[];cam.state='idle';clearInterval(cam.timer);cam.timer=setInterval(camTick,camTickMs());}
+}
+const camTickMs=()=>(CAM_SPEED[cam.speed]||CAM_SPEED[2])[1];
+
+/* ---------- Geometrie: Homographie Board (mm) ↔ Bild (0 bis 1) ---------- */
+/* H bildet Board-Punkte (X rechts, Y oben, in mm/170) auf Bildpunkte ab, h33=1 */
+function fitH(pts){
+  const rows=[],rhs=[];
+  pts.forEach(p=>{const X=p.X/170,Y=p.Y/170;rows.push([X,Y,1,0,0,0,-p.ix*X,-p.ix*Y]);rhs.push(p.ix);rows.push([0,0,0,X,Y,1,-p.iy*X,-p.iy*Y]);rhs.push(p.iy);});
+  return lsq(rows,rhs);
+}
+function projH(H,X,Y){const x=X/170,y=Y/170,w=H[6]*x+H[7]*y+1;return [(H[0]*x+H[1]*y+H[2])/w,(H[3]*x+H[4]*y+H[5])/w];}
+function invH(H,u,v){
+  const a=H[0]-u*H[6],b=H[1]-u*H[7],c=H[3]-v*H[6],d=H[4]-v*H[7],det=a*d-b*c;
+  if(Math.abs(det)<1e-12) return null;
+  const e=u-H[2],f=v-H[5];return [(e*d-b*f)/det*170,(a*f-e*c)/det*170];
+}
+/* Schräg blickende Kamera (wie bei Autodarts): Board erscheint als Ellipse, nicht als schmaler Streifen */
+function isAngled(H){
+  let lo=1,hi=0;for(let k=0;k<36;k++){const a=k*10*Math.PI/180,[,v]=projH(H,170*Math.sin(a),170*Math.cos(a));lo=Math.min(lo,v);hi=Math.max(hi,v);}
+  return hi-lo>0.15;
+}
+function fitCal(pts){
+  const rows=pts.map(p=>[p.X,p.Y,1,-p.ix*p.X,-p.ix*p.Y]),p=lsq(rows,pts.map(q=>q.ix));
+  const ln=lsq(pts.map(q=>[q.ix,1]),pts.map(q=>q.iy))||[0,0.5];
+  const ys=pts.map(q=>q.iy);
+  const H=pts.length>=4?fitH(pts):null;
+  const err=H?Math.sqrt(pts.reduce((s,q)=>{const [u,v]=projH(H,q.X,q.Y);return s+(u-q.ix)**2+(v-q.iy)**2;},0)/pts.length):null;
+  return {p,line:ln,band:[Math.max(0,Math.min(...ys)-0.12),Math.min(1,Math.max(...ys)+0.12)],H,angled:!!(H&&isAngled(H)),err};
+}
+/* Kalibrierung gilt nur fürs selbe Seitenverhältnis (Punkte sind relativ zur Bildgröße gespeichert) */
+const calOf=i=>{const id=cam.slots[i];const c=id&&cam.cal[id];if(!c||!c.p) return null;const ar=camAR(i);if(ar&&Math.abs(ar-(c.ar||4/3))>0.05) return null;return c;};
+const calStale=i=>{const id=cam.slots[i];const c=id&&cam.cal[id];const ar=camAR(i);return !!(c&&c.p&&ar&&Math.abs(ar-(c.ar||4/3))>0.05);};
+/* Suchbereich je Kamera: schräg die Board-Ellipse samt Surround und etwas Rand (300 mm, damit auch Darts
+   ganz außen mit Schaft und Flight im Bereich liegen), flach das Band um die Oberfläche */
+function maskOf(i){
+  const c=calOf(i);if(!c) return null;
+  const key=(cam.slots[i]||'')+':'+CW+'x'+CH+':'+cam.margin+':'+(c.pts||[]).map(q=>q.ix.toFixed(4)).join(',');
+  const m=cam.masks[i];if(m&&m.key===key) return m;
+  const a=new Uint8Array(CW*CH);let n=0,y0=CH,y1=0;
+  if(c.angled&&c.H){
+    for(let y=0;y<CH;y++) for(let x=0;x<CW;x++){const P=invH(c.H,(x+0.5)/CW,(y+0.5)/CH);if(P&&Math.hypot(P[0],P[1])<=300){a[y*CW+x]=1;n++;if(y<y0)y0=y;if(y>y1)y1=y;}}
+  }else{
+    const ys=(c.pts||[]).map(q=>q.iy);
+    y0=Math.max(0,Math.floor((Math.min(...ys)-cam.margin)*CH));y1=Math.min(CH-1,Math.ceil((Math.max(...ys)+cam.margin)*CH));
+    for(let y=y0;y<=y1;y++) for(let x=0;x<CW;x++){a[y*CW+x]=1;n++;}
+  }
+  return cam.masks[i]={key,a,n:Math.max(1,n),y0:Math.min(y0,y1),y1};
+}
 function gray(i){
   const v=cam.videos[i];if(!v||v.readyState<2) return null;
   wctx.drawImage(v,0,0,CW,CH);
@@ -1608,19 +1698,32 @@ function gray(i){
   for(let k=0,j=0;k<g.length;k++,j+=4) g[k]=(d[j]*77+d[j+1]*151+d[j+2]*28)>>8;
   return g;
 }
-function bandRows(c){const ys=(c.pts||[]).map(q=>q.iy);if(!ys.length) return [0,CH-1];return [Math.max(0,Math.floor((Math.min(...ys)-cam.margin)*CH)),Math.min(CH-1,Math.ceil((Math.max(...ys)+cam.margin)*CH))];}
-function diffFrac(f,r,c){
-  const [y0,y1]=bandRows(c);let n=0;
-  for(let y=y0;y<=y1;y++){const o=y*CW;for(let x=0;x<CW;x++) if(Math.abs(f[o+x]-r[o+x])>cam.thr) n++;}
-  return n/((y1-y0+1)*CW);
+/* Veränderte Pixel im Suchbereich: Anzahl (für Darts, unabhängig von der Größe des Suchbereichs) und Anteil (für die Hand) */
+function diffCount(f,r,m){
+  let n=0;
+  for(let y=m.y0;y<=m.y1;y++){const o=y*CW;for(let x=0;x<CW;x++){const k=o+x;if(m.a[k]&&Math.abs(f[k]-r[k])>cam.thr) n++;}}
+  return {n,frac:n/m.n};
 }
-function findTip(f,r,c){
-  const [y0,y1]=bandRows(c),px=[];
-  for(let y=y0;y<=y1;y++){const o=y*CW;for(let x=0;x<CW;x++) if(Math.abs(f[o+x]-r[o+x])>cam.thr){const nx=x/CW,ny=y/CH;px.push([nx,Math.abs(ny-(c.line[0]*nx+c.line[1]))]);}}
+/* Dartspitze: schräg der unterste zusammenhängende Teil der Veränderung (der Dart ragt im Bild nach oben),
+   flach die veränderten Pixel nächst der Oberflächenlinie. Ergebnis relativ zur Bildgröße. */
+function findTip(f,r,c,m){
+  if(c.angled){
+    const rows=new Array(CH).fill(0);
+    for(let y=m.y0;y<=m.y1;y++){const o=y*CW;for(let x=0;x<CW;x++){const k=o+x;if(m.a[k]&&Math.abs(f[k]-r[k])>cam.thr) rows[y]++;}}
+    for(let y=m.y1;y>=m.y0+2;y--){
+      if(rows[y]+rows[y-1]+rows[y-2]<5) continue;
+      let sx=0,sy=0,n=0;
+      for(let yy=y;yy>=Math.max(m.y0,y-4);yy--){const o=yy*CW;for(let x=0;x<CW;x++){const k=o+x;if(m.a[k]&&Math.abs(f[k]-r[k])>cam.thr){sx+=x;sy+=yy;n++;}}}
+      return n?{x:(sx/n+0.5)/CW,y:(sy/n+0.5)/CH}:null;
+    }
+    return null;
+  }
+  const px=[];
+  for(let y=m.y0;y<=m.y1;y++){const o=y*CW;for(let x=0;x<CW;x++) if(Math.abs(f[o+x]-r[o+x])>cam.thr){const nx=x/CW,ny=y/CH;px.push([nx,Math.abs(ny-(c.line[0]*nx+c.line[1])),ny]);}}
   if(px.length<8) return null;
   px.sort((a,b)=>a[1]-b[1]);
   const top=px.slice(0,12);
-  return top.reduce((s,p)=>s+p[0],0)/top.length;
+  return {x:top.reduce((s,p)=>s+p[0],0)/top.length,y:top.reduce((s,p)=>s+p[2],0)/top.length};
 }
 function solve(A,b){
   const n=b.length,M=A.map((r,i)=>r.concat([b[i]]));
@@ -1637,50 +1740,53 @@ function lsq(rows,rhs){
   rows.forEach((r,k)=>{for(let i=0;i<n;i++){b[i]+=r[i]*rhs[k];for(let j=0;j<n;j++) A[i][j]+=r[i]*r[j];}});
   return solve(A,b);
 }
-function fitCal(pts){
-  const rows=pts.map(p=>[p.X,p.Y,1,-p.ix*p.X,-p.ix*p.Y]),p=lsq(rows,pts.map(q=>q.ix));
-  const ln=lsq(pts.map(q=>[q.ix,1]),pts.map(q=>q.iy))||[0,0.5];
-  const ys=pts.map(q=>q.iy);
-  return {p,line:ln,band:[Math.max(0,Math.min(...ys)-0.12),Math.min(1,Math.max(...ys)+0.12)]};
-}
 function triangulate(lines){
   if(lines.length<2) return null;
   const P=lsq(lines.map(l=>[l[0],l[1]]),lines.map(l=>l[2]));
   if(!P||!isFinite(P[0])||!isFinite(P[1])||Math.hypot(P[0],P[1])>260) return null;
   return P;
 }
+/* Aus den Spitzen aller Kameras einen Board-Punkt bestimmen: je Kamera liefert die x-Position eine Gerade
+   auf dem Board (gilt für flache und schräge Kameras), mehrere Geraden ergeben den Schnittpunkt.
+   Sieht nur eine schräge Kamera den Dart, reicht ihre Homographie allein. */
+function locate(tips){
+  const lines=tips.map(({c,t})=>{const [a1,a2,a3,c1,c2]=c.p;return [a1-t.x*c1,a2-t.x*c2,t.x-a3];});
+  const P=triangulate(lines);if(P) return P;
+  const one=tips.find(({c})=>c.angled&&c.H);
+  if(one){const Q=invH(one.c.H,one.t.x,one.t.y);if(Q&&Math.hypot(Q[0],Q[1])<=260) return Q;}
+  return null;
+}
 const camAllowed=()=>!!game&&!game.winner&&!isBotTurn()&&canAct();
 function camTick(){
-  const frames=[0,1,2].map(i=>calOf(i)?gray(i):null);
-  if(frames.filter(Boolean).length<2) return;
-  const TH=[0.006,0.0035,0.002][cam.sens],HAND=0.12;
-  let mxR=0,mxM=0;
+  const ids=[0,1,2].filter(i=>calOf(i));
+  const frames=[0,1,2].map(i=>ids.includes(i)?gray(i):null);
+  const live=frames.filter(Boolean).length;
+  if(live<2&&!(live===1&&calOf(frames.findIndex(Boolean)).angled)) return;
+  // Schwellen in Pixeln der Rechenauflösung (480 breit): ab so vielen veränderten Pixeln gilt ein Dart als gelandet
+  const TH=[180,110,60][cam.sens]*CW*CH/129600,HAND=0.12;
+  let mxR=0,mxM=0,mxF=0;
   frames.forEach((f,i)=>{
-    if(!f) return;const c=calOf(i);
-    if(!cam.ref[i]) cam.ref[i]=f;
-    mxR=Math.max(mxR,diffFrac(f,cam.ref[i],c));
-    if(cam.prev[i]) mxM=Math.max(mxM,diffFrac(f,cam.prev[i],c));
+    if(!f) return;const m=maskOf(i);
+    if(!cam.ref[i]||cam.ref[i].length!==f.length) cam.ref[i]=f;
+    const d=diffCount(f,cam.ref[i],m);mxR=Math.max(mxR,d.n);mxF=Math.max(mxF,d.frac);
+    if(cam.prev[i]&&cam.prev[i].length===f.length) mxM=Math.max(mxM,diffCount(f,cam.prev[i],m).n);
     cam.prev[i]=f;
   });
   if(cam.state==='idle'){
-    if(mxR>TH){cam.state='moving';cam.still=0;}
+    if(mxR>TH){cam.state='moving';cam.still=0;camTouch();}
     else if(++cam.idle>40){cam.idle=0;frames.forEach((f,i)=>{if(f) cam.ref[i]=f;});}
     return;
   }
   cam.still=mxM<TH*0.5?cam.still+1:0;
   if(cam.still<4) return;
   const resetRef=()=>frames.forEach((f,i)=>{if(f) cam.ref[i]=f;});
-  if(mxR>HAND){
+  if(mxF>HAND){
     cam.last='Darts gezogen';resetRef();
     if(game&&game.locked&&camAllowed()) nextVisit(false);
   }else if(mxR>TH){
-    const lines=[];
-    frames.forEach((f,i)=>{
-      if(!f) return;const c=calOf(i),x=findTip(f,cam.ref[i],c);
-      if(x==null) return;
-      const [a1,a2,a3,c1,c2]=c.p;lines.push([a1-x*c1,a2-x*c2,x-a3]);
-    });
-    const P=triangulate(lines);
+    const tips=[];
+    frames.forEach((f,i)=>{if(!f) return;const c=calOf(i),t=findTip(f,cam.ref[i],c,maskOf(i));if(t) tips.push({c,t});});
+    const P=locate(tips);
     if(P){
       cam.lastP=P;drawMiniBoard();
       const d=classify(P[0],-P[1]);
@@ -1694,9 +1800,20 @@ function camTick(){
 }
 function camToggle(){
   if(cam.active){cam.active=false;clearInterval(cam.timer);cam.timer=null;cam.last='Erkennung gestoppt';return;}
-  if([0,1,2].filter(i=>calOf(i)&&cam.videos[i]).length<2){cam.last='Für die Erkennung braucht es mindestens 2 laufende, kalibrierte Kameras.';return;}
-  cam.active=true;cam.ref=[];cam.prev=[];cam.state='idle';cam.last='Erkennung aktiv, Board ruhig halten';
-  cam.timer=setInterval(camTick,120);
+  const ok=[0,1,2].filter(i=>calOf(i)&&cam.videos[i]);
+  if(ok.length<2&&!(ok.length===1&&calOf(ok[0]).angled)){cam.last='Für die Erkennung braucht es mindestens 2 laufende, kalibrierte Kameras.';return;}
+  cam.active=true;cam.ref=[];cam.prev=[];cam.state='idle';cam.last='Erkennung aktiv, Board ruhig halten';camTouch();
+  cam.timer=setInterval(camTick,camTickMs());
+}
+/* Board-Raster wie bei Autodarts über das Kamerabild legen: Ringe und Segmentgrenzen über die Homographie */
+function drawOverlay(x,H,w,h,color){
+  if(!H) return;
+  x.save();x.strokeStyle=color||'rgba(47,224,192,.95)';x.lineWidth=Math.max(1,w/400);
+  const pt=(r,a)=>{const [u,v]=projH(H,r*Math.sin(a),r*Math.cos(a));return [u*w,v*h];};
+  [170,162,107,99,15.9,6.35].forEach(r=>{x.beginPath();for(let k=0;k<=72;k++){const [px,py]=pt(r,k*5*Math.PI/180);k?x.lineTo(px,py):x.moveTo(px,py);}x.stroke();});
+  for(let k=0;k<20;k++){const a=(k*18+9)*Math.PI/180,[ax,ay]=pt(15.9,a),[bx,by]=pt(170,a);x.beginPath();x.moveTo(ax,ay);x.lineTo(bx,by);x.stroke();}
+  const [tx,ty]=pt(185,0);x.fillStyle=color||'rgba(47,224,192,.95)';x.font=`bold ${Math.max(10,w/40)}px sans-serif`;x.textAlign='center';x.textBaseline='middle';x.fillText('20',tx,ty);
+  x.restore();
 }
 function camPreview(){
   clearInterval(cam.pv);
@@ -1705,23 +1822,27 @@ function camPreview(){
     for(let i=0;i<3;i++){
       const cv=document.getElementById('camprev'+i),v=cam.videos[i];
       if(!cv) continue;any=true;
+      const fe=document.getElementById('camfps'+i);
+      if(fe){const st=cam.streams[i]&&cam.streams[i].getVideoTracks()[0];const s=st&&st.getSettings?st.getSettings():{};fe.textContent=v?`${s.width||v.videoWidth}×${s.height||v.videoHeight}, ${cam.meas[i]} Bilder/s`:'';}
       if(!v||v.readyState<2) continue;
-      const x=cv.getContext('2d');x.drawImage(v,0,0,cv.width,cv.height);
+      if(cv.width!==CW||cv.height!==CH){cv.width=CW;cv.height=CH;}
+      const x=cv.getContext('2d');x.drawImage(v,0,0,CW,CH);
       const c=calOf(i);if(!c) continue;
-      const [r0,r1]=bandRows(c);
+      const m=maskOf(i);
       if(cam.diag){
         const f=gray(i);if(!f) continue;
-        if(!cam.ref[i]) cam.ref[i]=f;
+        if(!cam.ref[i]||cam.ref[i].length!==f.length) cam.ref[i]=f;
         const r=cam.ref[i],img=x.getImageData(0,0,CW,CH),dd=img.data;let n=0;
-        for(let y=r0;y<=r1;y++){const o=y*CW;for(let q=0;q<CW;q++) if(Math.abs(f[o+q]-r[o+q])>cam.thr){n++;const j=(o+q)*4;dd[j]=255;dd[j+1]=40;dd[j+2]=40;}}
+        for(let y=m.y0;y<=m.y1;y++){const o=y*CW;for(let q=0;q<CW;q++){const k=o+q;if(m.a[k]&&Math.abs(f[k]-r[k])>cam.thr){n++;const j=k*4;dd[j]=255;dd[j+1]=40;dd[j+2]=40;}}}
         x.putImageData(img,0,0);
-        x.strokeStyle='rgba(60,210,120,.95)';x.lineWidth=1.5;x.beginPath();x.moveTo(0,c.line[1]*CH);x.lineTo(CW,(c.line[0]+c.line[1])*CH);x.stroke();
-        const tip=findTip(f,r,c);
-        if(tip!=null){x.strokeStyle='#F4D23C';x.lineWidth=2;x.beginPath();x.moveTo(tip*CW,r0);x.lineTo(tip*CW,r1);x.stroke();}
+        const tip=findTip(f,r,c,m);
+        if(tip){x.fillStyle='#F4D23C';x.strokeStyle='#1F201D';x.lineWidth=2;x.beginPath();x.arc(tip.x*CW,tip.y*CH,5,0,7);x.fill();x.stroke();}
         const el=document.getElementById('camdiag'+i);
-        if(el) el.textContent=`Veränderung ${(n/((r1-r0+1)*CW)*100).toFixed(1).replace('.',',')} %${tip!=null?', Spitze gefunden':''}`;
+        if(el) el.textContent=`Veränderung ${(n/m.n*100).toFixed(1).replace('.',',')} %${tip?', Spitze gefunden':''}`;
       }
-      x.strokeStyle='rgba(244,210,60,.9)';x.lineWidth=1;x.strokeRect(0.5,r0+0.5,cv.width-1,r1-r0);
+      if(c.angled) drawOverlay(x,c.H,CW,CH);
+      else{x.strokeStyle='rgba(244,210,60,.9)';x.lineWidth=1;x.strokeRect(0.5,m.y0+0.5,CW-1,m.y1-m.y0);
+        x.strokeStyle='rgba(60,210,120,.95)';x.lineWidth=1.5;x.beginPath();x.moveTo(0,c.line[1]*CH);x.lineTo(CW,(c.line[0]+c.line[1])*CH);x.stroke();}
     }
     if(!any){clearInterval(cam.pv);cam.pv=null;}
   },200);
@@ -1737,14 +1858,35 @@ function drawMiniBoard(){
   x.fillStyle='#EAE4D3';x.font='600 9px sans-serif';x.textAlign='center';x.textBaseline='middle';x.fillText('20',c,5);
   if(cam.lastP){const [X,Y]=cam.lastP;x.fillStyle='#F4D23C';x.strokeStyle='#1F201D';x.lineWidth=2;x.beginPath();x.arc(c+X*sc,c-Y*sc,5,0,7);x.fill();x.stroke();}
 }
+/* Kleines Graustufenbild zum Erkennen verrutschter Kameras (Kalibrierung beim Start prüfen) */
+function thumbOf(i){
+  const v=cam.videos[i];if(!v||v.readyState<2) return null;
+  const w=64,h=Math.round(64*v.videoHeight/v.videoWidth),c=document.createElement('canvas');c.width=w;c.height=h;
+  const x=c.getContext('2d',{willReadFrequently:true});x.drawImage(v,0,0,w,h);
+  const d=x.getImageData(0,0,w,h).data,g=[];for(let j=0;j<d.length;j+=4) g.push((d[j]*77+d[j+1]*151+d[j+2]*28)>>8);
+  return g;
+}
+/* Normierte Kreuzkorrelation: 1 = gleiches Bild, unempfindlich gegen gleichmäßig andere Helligkeit */
+function ncc(a,b){
+  if(!a||!b||a.length!==b.length) return 1;
+  const n=a.length,ma=a.reduce((s,v)=>s+v,0)/n,mb=b.reduce((s,v)=>s+v,0)/n;let s=0,sa=0,sb=0;
+  for(let k=0;k<n;k++){const x=a[k]-ma,y=b[k]-mb;s+=x*y;sa+=x*x;sb+=y*y;}
+  return sa&&sb?s/Math.sqrt(sa*sb):1;
+}
+function checkMoved(){
+  let changed=false;
+  for(let i=0;i<3;i++){const c=calOf(i),m=!!(c&&c.thumb&&ncc(thumbOf(i),c.thumb)<0.8);if(m!==cam.moved[i]){cam.moved[i]=m;changed=true;}}
+  if(changed&&document.getElementById('camprev0')) renderCam();
+}
 function drawCal(){
   const cv=document.getElementById('calcv');if(!cv||!cam.calImg) return;
   const x=cv.getContext('2d');x.drawImage(cam.calImg,0,0,cv.width,cv.height);
-  cam.calPts.forEach((p,k)=>{x.fillStyle='#F4D23C';x.strokeStyle='#1F201D';x.lineWidth=2;x.beginPath();x.arc(p.ix*cv.width,p.iy*cv.height,7,0,7);x.fill();x.stroke();x.fillStyle='#1F201D';x.font='bold 10px sans-serif';x.textAlign='center';x.textBaseline='middle';x.fillText(String(k+1),p.ix*cv.width,p.iy*cv.height);});
+  if(cam.calFit) drawOverlay(x,cam.calFit.H,cv.width,cv.height);
+  cam.calPts.forEach((p,k)=>{x.fillStyle='#F4D23C';x.strokeStyle='#1F201D';x.lineWidth=2;x.beginPath();x.arc(p.ix*cv.width,p.iy*cv.height,9,0,7);x.fill();x.stroke();x.fillStyle='#1F201D';x.font='bold 12px sans-serif';x.textAlign='center';x.textBaseline='middle';x.fillText(String(k+1),p.ix*cv.width,p.iy*cv.height);});
 }
 function calSnap(){
   const v=cam.videos[cam.calSlot];if(!v||v.readyState<2) return;
-  const c=document.createElement('canvas');c.width=640;c.height=480;c.getContext('2d').drawImage(v,0,0,640,480);cam.calImg=c;
+  const w=960,h=Math.round(960*v.videoHeight/v.videoWidth),c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(v,0,0,w,h);cam.calImg=c;
 }
 function calClick(e){
   const cv=e.target,r=cv.getBoundingClientRect(),k=cam.calPts.length;
@@ -1752,61 +1894,96 @@ function calClick(e){
   cam.calPts.push({ix:(e.clientX-r.left)/r.width,iy:(e.clientY-r.top)/r.height,X:CAL_PTS[k][1],Y:CAL_PTS[k][2]});
   if(cam.calPts.length===CAL_PTS.length){
     const fit=fitCal(cam.calPts);
-    if(fit.p){cam.cal[cam.slots[cam.calSlot]]=Object.assign({pts:cam.calPts},fit);store.set('dart.camcal',cam.cal);cam.last=`Kamera ${cam.calSlot+1} kalibriert`;}
-    else cam.err='Die Kalibrierung ging nicht auf. Bitte die Punkte genauer setzen.';
-    cam.calSlot=-1;cam.calPts=[];renderCam();return;
+    if(fit.p&&fit.H) cam.calFit=fit;
+    else{cam.err='Die Kalibrierung ging nicht auf. Bitte die Punkte genauer setzen.';cam.calPts=[];}
   }
   renderCam();
 }
+function calSave(){
+  const i=cam.calSlot,fit=cam.calFit;if(i<0||!fit) return;
+  cam.cal[cam.slots[i]]=Object.assign({pts:cam.calPts,ar:cam.calImg.width/cam.calImg.height,thumb:thumbOf(i)},fit);
+  store.set('dart.camcal',cam.cal);cam.masks=[];cam.moved[i]=false;cam.ref=[];cam.prev=[];
+  cam.last=`Kamera ${i+1} kalibriert`;cam.calSlot=-1;cam.calPts=[];cam.calFit=null;
+}
 function renderCam(){
+  if(cam.sleeping) camWake().then(()=>{if(document.getElementById('camprev0')||!cam.devices.length) renderCam();});
+  camTouch();
   const hdr='<header class="gbar"><h1 class="gmode">Kamera</h1><button class="ghost" data-act="back">Zurück</button></header>';
+  const segBtns=(attr,list,cur,lab)=>`<div class="seg" role="group" aria-label="${lab}">${list.map(([val,txt],k)=>`<button ${attr}="${k}" class="${cur===val?'on':''}" aria-pressed="${cur===val}">${txt}</button>`).join('')}</div>`;
   if(cam.calSlot>=0){
-    const k=cam.calPts.length;
-    app.innerHTML=`<div class="wrap">${hdr}<p>Kamera ${cam.calSlot+1}: Tippe auf <b>${CAL_PTS[k][0]}</b> <span class="muted">(Punkt ${k+1} von ${CAL_PTS.length})</span></p>
-    <canvas id="calcv" class="calcv" width="640" height="480" aria-label="Standbild der Kamera zum Kalibrieren"></canvas>
-    <div class="addrow"><button class="ghost" data-act="calsnap">Neues Standbild</button><button class="ghost" data-act="calundo" ${k?'':'disabled'}>Punkt zurück</button><button class="ghost" data-act="calcancel">Abbrechen</button></div></div>`;
+    const k=cam.calPts.length,fit=cam.calFit;
+    const q=fit&&fit.err!=null?fit.err*100:null;
+    app.innerHTML=`<div class="wrap camwide">${hdr}
+    ${fit?`<p>Kamera ${cam.calSlot+1}: Passt das grüne Raster auf Ringe und Segmente der Scheibe? <span class="${q<1?'okc':'warnt'}">Abweichung ${q.toFixed(1).replace('.',',')} %${q<1?', gut':', bitte Punkte genauer setzen'}</span></p>`:
+      `<p>Kamera ${cam.calSlot+1}: Tippe auf <b>${CAL_PTS[k][0]}</b> <span class="muted">(Punkt ${k+1} von ${CAL_PTS.length}). Orientier dich an den Zahlen am Rand, im Kamerabild kann die 20 auch unten oder seitlich liegen.</span></p>`}
+    ${cam.err?`<p class="err" role="alert">${esc(cam.err)}</p>`:''}
+    <canvas id="calcv" class="calcv" width="${cam.calImg?cam.calImg.width:960}" height="${cam.calImg?cam.calImg.height:540}" aria-label="Standbild der Kamera zum Kalibrieren"></canvas>
+    <div class="addrow">${fit?'<button class="primary" data-act="calsave">Übernehmen</button><button class="ghost" data-act="calreset">Punkte neu setzen</button>':`<button class="ghost" data-act="calsnap">Neues Standbild</button><button class="ghost" data-act="calundo" ${k?'':'disabled'}>Punkt zurück</button>`}<button class="ghost" data-act="calcancel">Abbrechen</button></div>
+    <p class="muted small">Tipp: Die Punkte möglichst genau auf den Draht setzen. Bei Weitwinkel-Kameras weicht das Raster am Rand etwas ab, das ist normal.</p></div>`;
     drawCal();return;
   }
-  const short=s=>s.length>22?s.slice(0,21)+'…':s;
   const slots=cam.devices.length?[0,1,2].map(i=>{
-    const ok=!!calOf(i);
-    return `<div class="camslot"><div class="camhead"><b>Kamera ${i+1}</b><span class="${ok?'okc':'muted'}">${ok?'kalibriert':'nicht kalibriert'}</span></div>
-    <canvas id="camprev${i}" class="camprev" width="320" height="240"></canvas>
-    <div class="seg" role="group" aria-label="Gerät für Kamera ${i+1}">${cam.devices.map((d,j)=>`<button data-cs="${i}:${j}" class="${cam.slots[i]===d.id?'on':''}" aria-pressed="${cam.slots[i]===d.id}">${esc(short(d.label))}</button>`).join('')}</div>
+    const ok=!!calOf(i),stale=calStale(i);
+    return `<div class="camslot"><div class="camhead"><b>Kamera ${i+1}</b><span class="${ok?'okc':'muted'}">${ok?(calOf(i).angled?'kalibriert, schräg':'kalibriert, flach'):stale?'neu kalibrieren':'nicht kalibriert'}</span></div>
+    <canvas id="camprev${i}" class="camprev" width="${CW}" height="${CH}" aria-label="Vorschau Kamera ${i+1}"></canvas>
+    <p class="muted small camfps" id="camfps${i}"></p>
+    ${cam.moved[i]?'<p class="err small">Das Bild weicht stark von der Kalibrierung ab. Wurde die Kamera bewegt? Bitte das Raster prüfen und neu kalibrieren.</p>':''}
+    ${stale?'<p class="muted small">Die Auflösung hat ein anderes Seitenverhältnis als bei der Kalibrierung.</p>':''}
+    <label class="olabel" for="camdev${i}">Gerät</label><select id="camdev${i}" class="pinput" data-camdev="${i}"><option value="">Keine Kamera</option>${cam.devices.map((d,j)=>`<option value="${j}" ${cam.slots[i]===d.id?'selected':''}>${esc(d.label)}</option>`).join('')}</select>
     ${cam.diag&&ok?`<p class="diagl" id="camdiag${i}">Diagnose läuft …</p>`:''}
     <button class="ghost" data-cal="${i}" ${cam.videos[i]?'':'disabled'}>${ok?'Neu kalibrieren':'Kalibrieren'}</button></div>`;}).join(''):'';
-  app.innerHTML=`<div class="wrap">${hdr}
-  <p class="muted">Drei USB-Kameras rund ums Board, etwa im 120-Grad-Abstand, knapp vor der Scheibe und flach über die Oberfläche blickend, so wie bei Autodarts. Die Erkennung läuft im Browser am PC, der Spielstand wie gewohnt. Daneben liegende Würfe korrigierst du mit „Rückgängig“ und den Tasten.</p>
+  const anyFlat=[0,1,2].some(i=>calOf(i)&&!calOf(i).angled);
+  app.innerHTML=`<div class="wrap camwide">${hdr}
+  <p class="muted">Drei USB-Kameras am Ring rund ums Board, etwa im 120-Grad-Abstand, schräg auf die Scheibe blickend, so wie bei Autodarts. Die Erkennung läuft im Browser am PC. Wichtig: Autodarts und andere Kamera-Programme vorher ganz schließen, eine Kamera kann immer nur ein Programm benutzen. Daneben liegende Würfe korrigierst du mit „Rückgängig“ und den Tasten.</p>
   ${cam.err?`<p class="err" role="alert">${esc(cam.err)}</p>`:''}
-  ${cam.streams.some(Boolean)?`<p class="muted small">Kameras laufen mit ${camModeText(CAM_MODES[cam.mode||0])}${cam.mode?', sparsam wegen knapper USB-Bandbreite':''}.</p>`:''}
+  ${cam.sleeping?'<p class="muted">Kameras im Standby, sie starten gleich wieder.</p>':''}
+  ${cam.mode&&cam.streams.some(Boolean)?`<p class="muted small">Angefordert: ${camModeText(cam.mode)}${cam.modeStep?', sparsamer wegen knapper USB-Bandbreite':''}.</p>`:''}
   <button class="ghost" data-act="camscan" style="margin-bottom:14px">${cam.devices.length?'Kameras neu suchen':'Kameras suchen'}</button>
-  ${slots}
+  <div class="camgrid">${slots}</div>
+  <section><h2>Kameraeinstellungen</h2>
+  <div class="opt"><span class="olabel">Auflösung</span>${segBtns('data-cres',CAM_RES.map((r,k)=>[k,r.n]),cam.res,'Auflösung')}</div>
+  <div class="opt"><span class="olabel">Bilder pro Sekunde</span>${segBtns('data-cfps',CAM_FPS.map(f=>[f,String(f)]),cam.fps,'Bilder pro Sekunde')}</div>
+  <div class="opt"><span class="olabel">Erkennungsgeschwindigkeit</span>${segBtns('data-cspeed',CAM_SPEED.map((s,k)=>[k,s[0]]),cam.speed,'Erkennungsgeschwindigkeit')}</div>
+  <div class="opt"><span class="olabel">Kameras in Standby nach</span>${segBtns('data-cstby',CAM_STANDBY,cam.standby,'Standby')}</div>
+  <div class="opt"><span class="olabel">Beim Start prüfen, ob eine Kamera bewegt wurde</span>${segBtns('data-ccheck',[[false,'Aus'],[true,'An']],cam.check,'Kalibrierung beim Start prüfen')}</div></section>
   ${cam.devices.length?`<section><h2>Erkennung</h2><div class="opt"><span class="olabel">Empfindlichkeit</span><div class="seg" role="group" aria-label="Empfindlichkeit">${['Niedrig','Mittel','Hoch'].map((n,i)=>`<button data-sens="${i}" class="${cam.sens===i?'on':''}" aria-pressed="${cam.sens===i}">${n}</button>`).join('')}</div></div>
   <div class="opt"><span class="olabel">Helligkeitsschwelle</span><div class="seg" role="group" aria-label="Helligkeitsschwelle">${[[18,'Fein'],[28,'Normal'],[40,'Grob']].map((c,i)=>`<button data-thr="${i}" class="${cam.thr===c[0]?'on':''}" aria-pressed="${cam.thr===c[0]}">${c[1]}</button>`).join('')}</div></div>
-  <div class="opt"><span class="olabel">Erkennungsbereich um die Board-Oberfläche</span><div class="seg" role="group" aria-label="Erkennungsbereich">${[[0.06,'Schmal'],[0.12,'Mittel'],[0.2,'Breit']].map((c,i)=>`<button data-mg="${i}" class="${cam.margin===c[0]?'on':''}" aria-pressed="${cam.margin===c[0]}">${c[1]}</button>`).join('')}</div></div>
+  ${anyFlat?`<div class="opt"><span class="olabel">Erkennungsbereich um die Board-Oberfläche (flache Kameras)</span><div class="seg" role="group" aria-label="Erkennungsbereich">${[[0.06,'Schmal'],[0.12,'Mittel'],[0.2,'Breit']].map((c,i)=>`<button data-mg="${i}" class="${cam.margin===c[0]?'on':''}" aria-pressed="${cam.margin===c[0]}">${c[1]}</button>`).join('')}</div></div>`:''}
   <div class="addrow" style="margin-bottom:12px"><button class="ghost" data-act="camdiag">${cam.diag?'Diagnose aus':'Diagnose an'}</button><button class="ghost" data-act="camref">Referenzbild neu setzen</button></div>
-  ${cam.diag?'<p class="muted">Rot zeigt Veränderungen zum Referenzbild, die grüne Linie die Board-Oberfläche, die gelbe Linie die gefundene Dartspitze. Der gelbe Rahmen ist der Erkennungsbereich. Ohne Wurf sollte kaum Rot zu sehen sein.</p>':''}
+  ${cam.diag?'<p class="muted">Rot zeigt Veränderungen zum Referenzbild im Suchbereich, der gelbe Punkt die gefundene Dartspitze. Ohne Wurf sollte kaum Rot zu sehen sein.</p>':''}
   <button class="primary start" data-act="camtoggle">${cam.active?'Erkennung stoppen':'Erkennung starten'}</button>
   <p class="camline" id="camstat">${esc(cam.last||'Noch kein Wurf erkannt')}</p>
   <figure class="heat"><canvas id="camboard" class="camboard" width="220" height="220" aria-label="Zuletzt erkannte Position"></canvas><figcaption>Zuletzt erkannte Position am Board</figcaption></figure></section>`:''}
   </div>`;
   camPreview();drawMiniBoard();
 }
+async function camRestart(){camStop();cam.masks=[];cam.ref=[];cam.prev=[];if(cam.devices.length) await camStart();}
 async function camClick(t){
   const a=t.dataset.act;cam.err='';
   if(a==='cam'){renderCam();window.scrollTo(0,0);return;}
   if(a==='camscan'){app.querySelector('[data-act="camscan"]').textContent='Suche …';await camScan();renderCam();return;}
-  if(t.dataset.cs){const [i,j]=t.dataset.cs.split(':').map(Number);cam.slots[i]=cam.devices[j].id;store.set('dart.camslots',cam.slots);await camStart();renderCam();return;}
-  if(t.dataset.cal!==undefined){cam.calSlot=+t.dataset.cal;cam.calPts=[];calSnap();renderCam();return;}
+  if(t.dataset.cal!==undefined){cam.calSlot=+t.dataset.cal;cam.calPts=[];cam.calFit=null;calSnap();renderCam();return;}
+  if(t.dataset.cres!==undefined){cam.res=+t.dataset.cres;saveCamSet();await camRestart();renderCam();return;}
+  if(t.dataset.cfps!==undefined){cam.fps=CAM_FPS[+t.dataset.cfps];saveCamSet();await camRestart();renderCam();return;}
+  if(t.dataset.cspeed!==undefined){cam.speed=+t.dataset.cspeed;saveCamSet();if(cam.timer){clearInterval(cam.timer);cam.timer=setInterval(camTick,camTickMs());}renderCam();return;}
+  if(t.dataset.cstby!==undefined){cam.standby=CAM_STANDBY[+t.dataset.cstby][0];saveCamSet();renderCam();return;}
+  if(t.dataset.ccheck!==undefined){cam.check=t.dataset.ccheck==='1';saveCamSet();if(cam.check) checkMoved();renderCam();return;}
   if(t.dataset.sens!==undefined){cam.sens=+t.dataset.sens;saveCamSet();renderCam();return;}
   if(t.dataset.thr!==undefined){cam.thr=[18,28,40][+t.dataset.thr];saveCamSet();renderCam();return;}
-  if(t.dataset.mg!==undefined){cam.margin=[0.06,0.12,0.2][+t.dataset.mg];saveCamSet();renderCam();return;}
+  if(t.dataset.mg!==undefined){cam.margin=[0.06,0.12,0.2][+t.dataset.mg];saveCamSet();cam.masks=[];renderCam();return;}
   if(a==='camdiag'){cam.diag=!cam.diag;if(cam.diag&&!cam.active){cam.ref=[];}renderCam();return;}
   if(a==='camref'){cam.ref=[];cam.prev=[];cam.state='idle';cam.last='Referenzbild neu gesetzt';renderCam();return;}
   if(a==='camtoggle'){camToggle();renderCam();return;}
   if(a==='calsnap'){calSnap();drawCal();return;}
   if(a==='calundo'){cam.calPts.pop();renderCam();return;}
-  if(a==='calcancel'){cam.calSlot=-1;cam.calPts=[];renderCam();}
+  if(a==='calreset'){cam.calPts=[];cam.calFit=null;renderCam();return;}
+  if(a==='calsave'){calSave();renderCam();return;}
+  if(a==='calcancel'){cam.calSlot=-1;cam.calPts=[];cam.calFit=null;renderCam();}
+}
+async function camDevChange(sel){
+  const i=+sel.dataset.camdev,j=sel.value;
+  cam.slots[i]=j===''?null:cam.devices[+j].id;store.set('dart.camslots',cam.slots);
+  await camRestart();renderCam();
 }
 
 /* ---------- Trainer ---------- */
@@ -2275,7 +2452,7 @@ app.addEventListener('click',e=>{
   if(t.dataset.prof!==undefined||t.dataset.jg||t.dataset.preview!==undefined||t.dataset.delset||t.dataset.walk!==undefined||t.dataset.act==='addset'){profClick(t);return;}
   if(['coach','coachai','coachstop','coachlocal','coachfb','coachask'].includes(t.dataset.act)||t.dataset.drill!==undefined||t.dataset.cplayer!==undefined){coachClick(t);return;}
   if(['online','onlcreate','onljoin'].includes(t.dataset.act)||t.dataset.oseat!==undefined||t.dataset.ojseat!==undefined){onlClick(t);return;}
-  if(['cam','camscan','camtoggle','calsnap','calundo','calcancel','camdiag','camref'].includes(t.dataset.act)||t.dataset.cs||t.dataset.cal!==undefined||t.dataset.sens!==undefined||t.dataset.thr!==undefined||t.dataset.mg!==undefined){camClick(t);return;}
+  if(['cam','camscan','camtoggle','calsnap','calundo','calcancel','calsave','calreset','camdiag','camref'].includes(t.dataset.act)||t.dataset.cal!==undefined||t.dataset.sens!==undefined||t.dataset.thr!==undefined||t.dataset.mg!==undefined||t.dataset.cres!==undefined||t.dataset.cfps!==undefined||t.dataset.cspeed!==undefined||t.dataset.cstby!==undefined||t.dataset.ccheck!==undefined){camClick(t);return;}
   if(['tour','tourstart','tourend'].includes(t.dataset.act)||t.dataset.tf||t.dataset.play){tourClick(t);return;}
   if(t.dataset.act==='stats'||t.dataset.act==='back'||t.dataset.smode||t.dataset.splayer!==undefined||t.dataset.del||t.dataset.train!==undefined){statsClick(t);return;}
   if(t.dataset.mode){setup.mode=t.dataset.mode;setupErr='';saveSetup();renderSetup();return;}
@@ -2297,6 +2474,7 @@ app.addEventListener('click',e=>{
 });
 app.addEventListener('change',e=>{
   if(e.target.id==='smode'){sv.mode=e.target.value;sv.armed=null;drawStats();}
+  if(e.target.dataset.camdev!==undefined){camDevChange(e.target);return;}
   if(e.target.id==='techfile'&&e.target.files&&e.target.files[0]) techCheck(e.target.files[0]);
   if(e.target.id==='restore'&&e.target.files&&e.target.files[0]) restoreFile(e.target.files[0]);
   if(e.target.dataset.pset!==undefined){setup.players[+e.target.dataset.pset].set=e.target.value||'';saveSetup();}
@@ -2320,7 +2498,7 @@ window.pfeilerlUpdate=()=>{
   document.getElementById('updx').onclick=()=>d.remove();
 };
 
-if(typeof window.__pfeilerlTest==='function') window.__pfeilerlTest({MODES,CATS,checkout,classify,fitCal,triangulate,startGame,throwDart,nextVisit,undo,getGame:()=>game,setup,loadRecords,onlClick,tvClick,profClick,coachClick,drawStats,sv,newAchievements,gameKey,VERSION,dupName,camErrText,CAM_MODES,untrusted,validGame,validCode,mergeBackup,quickModes,rememberPlayers,addRegular,localRecs,getOnl:()=>onl,getTv:()=>tv,els:null});
+if(typeof window.__pfeilerlTest==='function') window.__pfeilerlTest({MODES,CATS,checkout,classify,fitCal,triangulate,startGame,throwDart,nextVisit,undo,getGame:()=>game,setup,loadRecords,onlClick,tvClick,profClick,coachClick,drawStats,sv,newAchievements,gameKey,VERSION,dupName,camErrText,CAM_MODES,fitH,projH,invH,isAngled,findTip,locate,ncc,untrusted,validGame,validCode,mergeBackup,quickModes,rememberPlayers,addRegular,localRecs,getOnl:()=>onl,getTv:()=>tv,els:null});
 applyTheme();
 renderSetup();
 })();

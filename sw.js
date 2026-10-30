@@ -1,4 +1,4 @@
-const CACHE='pfeilerl-1.3.5';
+const CACHE='pfeilerl-1.4.0';
 const FONTS=['barlow-400','barlow-500','barlow-600','barlow-condensed-500','barlow-condensed-600','barlow-condensed-700'].map(f=>'./fonts/'+f+'.woff2');
 const CORE=['./','./index.html','./manifest.webmanifest','./icon-192.png','./icon-512.png','./icon-maskable.png','./apple-touch-icon.png',...FONTS];
 self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(CORE.map(u=>new Request(u,{cache:'reload'})))).then(()=>self.skipWaiting()));});

@@ -185,6 +185,37 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
    ok(good===200,'200 von 200 Punkten auf 1 mm genau',good+'/200');
    ok(JSON.stringify(api.classify(0,-103))==='{"seg":20,"mult":3}','Punkt auf T20 wird als T20 erkannt');}
 
+  console.log('Kamera: schräge Kameras wie bei Autodarts');
+  {const {api}=env();
+   // Lochkamera am Ring: Position in mm (Board in der Ebene z=0, Spieler bei z>0), Blick auf die Board-Mitte
+   const mkCam=(ang,dist,height,f,ar)=>{
+     const C=[dist*Math.sin(ang),dist*Math.cos(ang),height],t=[0,0,0];
+     const z=[t[0]-C[0],t[1]-C[1],t[2]-C[2]],nz=Math.hypot(...z),Z=z.map(v=>v/nz);
+     let X=[Z[1]*0-Z[2]*0,Z[2]*0-Z[0]*1,Z[0]*0-Z[1]*0];// up-Hilfsvektor (0,0,1) quer zu Z
+     X=[Z[1]*1-Z[2]*0,Z[2]*0-Z[0]*1,0];const nx=Math.hypot(...X);X=X.map(v=>v/nx);
+     const Y=[Z[1]*X[2]-Z[2]*X[1],Z[2]*X[0]-Z[0]*X[2],Z[0]*X[1]-Z[1]*X[0]];
+     return (px,py,pz=0)=>{const d=[px-C[0],py-C[1],pz-C[2]],xc=d[0]*X[0]+d[1]*X[1]+d[2]*X[2],yc=d[0]*Y[0]+d[1]*Y[1]+d[2]*Y[2],zc=d[0]*Z[0]+d[1]*Z[1]+d[2]*Z[2];
+       return [0.5+f*xc/zc,0.5-f*ar*yc/zc];};};
+   // drei Kameras im 120-Grad-Abstand am Ring (Radius 250 mm), 90 mm vor der Scheibe, 16:9
+   const cams=[0,120,240].map(g=>mkCam(g*Math.PI/180+0.3,250,90,0.55,16/9));
+   const CAL=[[0,0],[0,170],[170,0],[0,-170],[-170,0]];
+   const cals=cams.map(pr=>api.fitCal(CAL.map(([X,Y])=>{const [ix,iy]=pr(X,Y);return {X,Y,ix,iy};})));
+   ok(cals.every(c=>c.H&&c.angled&&c.err<1e-6),'Homographie aus 5 Punkten exakt, als schräg erkannt',cals.map(c=>c.err).join(', '));
+   let maxE=0;for(let k=0;k<300;k++){const X=(Math.random()*2-1)*170,Y=(Math.random()*2-1)*170;cams.forEach((pr,i)=>{const [u,v]=pr(X,Y),Q=api.invH(cals[i].H,u,v);maxE=Math.max(maxE,Math.hypot(Q[0]-X,Q[1]-Y));});}
+   ok(maxE<0.01,'Bildpunkt zurück aufs Board auf 0,01 mm genau',maxE);
+   // Würfe: Spitze auf dem Board, je Kamera die Bildposition der Spitze
+   const hits=[[0,103,'T20'],[166*Math.sin(Math.PI/180*18),166*Math.cos(Math.PI/180*18),'D1'],[0,0,'50'],[-134,0,'S11'],[-134*Math.sin(Math.PI/180*72),134*Math.cos(Math.PI/180*72),'S14']];
+   let good=0;const got=[];
+   hits.forEach(([X,Y,want])=>{const tips=cams.map((pr,i)=>{const [x,y]=pr(X,Y);return {c:cals[i],t:{x,y}};});const P=api.locate(tips);const d=P&&api.classify(P[0],-P[1]);
+     const lab=d?(d.seg===25?(d.mult===2?'50':'25'):(['','S','D','T'][d.mult]+d.seg)):'–';got.push(lab);if(lab===want) good++;});
+   ok(good===hits.length,'T20, D1, Bull, S11 und S14 aus drei schrägen Kameras richtig erkannt',got.join(', '));
+   const one=api.locate([{c:cals[1],t:(()=>{const [x,y]=cams[1](0,103);return {x,y};})()}]);
+   ok(one&&Math.hypot(one[0],one[1]-103)<0.5,'Eine schräge Kamera allein findet den Punkt auch',one&&one.map(v=>v.toFixed(2)).join(', '));
+   // flache Kamera (knapp über der Oberfläche) bleibt flach
+   const flat=mkCam(0.3,260,8,0.6,16/9);
+   ok(!api.fitCal(CAL.map(([X,Y])=>{const [ix,iy]=flat(X,Y);return {X,Y,ix,iy};})).angled,'Flach blickende Kamera wird als flach erkannt');
+   ok(api.ncc([1,2,3,4,5],[2,4,6,8,10])>0.99&&api.ncc([1,2,3,4,5],[5,4,3,2,1])<0,'Bildvergleich: Helligkeit egal, Verschiebung erkannt');}
+
   console.log(`\n${passed} bestanden, ${failed} fehlgeschlagen`);
   process.exit(failed?1:0);
 })();
