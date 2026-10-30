@@ -1781,8 +1781,15 @@ function camTick(){
   if(cam.still<4) return;
   const resetRef=()=>frames.forEach((f,i)=>{if(f) cam.ref[i]=f;});
   if(mxF>HAND){
-    cam.last='Darts gezogen';resetRef();
-    if(game&&game.locked&&camAllowed()) nextVisit(false);
+    // Darts ziehen beendet die Aufnahme wie bei Autodarts, sobald mindestens ein Dart gezählt ist.
+    // Nicht erkannte Darts zählen dabei als daneben (nextVisit füllt auf), die Meldung sagt das an.
+    resetRef();
+    if(game&&(game.locked||game.legDone||game.visit.length)&&camAllowed()){
+      const miss=game.locked||game.legDone?0:3-game.visit.length;
+      nextVisit(false);
+      cam.last=miss?`Darts gezogen, ${miss===1?'1 Dart wurde':miss+' Darts wurden'} nicht erkannt und zählen als daneben. Falls nötig: „Rückgängig“.`:'Darts gezogen, nächster Spieler';
+      cam.pulledAt=Date.now();
+    }else if(!(Date.now()-(cam.pulledAt||0)<5000)) cam.last='Darts gezogen';  // Hand geht wieder weg: Hinweis stehen lassen
   }else if(mxR>TH){
     const tips=[];
     frames.forEach((f,i)=>{if(!f) return;const c=calOf(i),t=findTip(f,cam.ref[i],c,maskOf(i));if(t) tips.push({c,t});});

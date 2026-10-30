@@ -1,6 +1,6 @@
 {
   "name": "pfeilerl",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Pfeilerl – Dart-Zähler mit 19 Spielmodi, Computer-Gegnern, Statistik, KI-Trainer und Kamera-Erkennung",
   "private": true,
   "type": "module",
