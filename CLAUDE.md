@@ -63,7 +63,7 @@ Auf claude.ai erlaubt die Content-Security-Policy externe Skripte nur von cdnjs.
 
 ## Kamera-Erkennung (Prototyp)
 
-Drei USB-Kameras seitlich am Board. Pro Kamera eine 2D→1D-Projektion (5 Parameter, kalibriert über Bull und die äußeren Doppel-Drähte von 20, 6, 3, 11). Erkennung über Differenzbilder im Band um die Board-Oberfläche: Veränderung → warten bis ruhig → Spitze = veränderte Pixel nächst der Oberflächenlinie → je Kamera eine Gerade auf dem Board → Schnittpunkt per kleinsten Quadraten → `classify(x, y)` mit echten Board-Maßen in mm. Große Veränderung = Hand zieht Darts → nächste Aufnahme. Hier liegt der größte Verbesserungsbedarf, sobald echte Kamerabilder vorliegen.
+Drei USB-Kameras seitlich am Board. Pro Kamera eine 2D→1D-Projektion (5 Parameter, kalibriert über Bull und die äußeren Doppel-Drähte von 20, 6, 3, 11). Erkennung über Differenzbilder im Band um die Board-Oberfläche: Veränderung → warten bis ruhig → Spitze = veränderte Pixel nächst der Oberflächenlinie → je Kamera eine Gerade auf dem Board → Schnittpunkt per kleinsten Quadraten → `classify(x, y)` mit echten Board-Maßen in mm. Große Veränderung = Hand zieht Darts → nächste Aufnahme. Die Kameras werden mit 320×240 (4:3) angefordert, passend zur Rechenauflösung. `camStart()` probiert die Stufen in `CAM_MODES` (15, 10, 5 Bilder/s) der Reihe nach, solange eine Kamera mit `NotReadableError` scheitert, etwa weil alle drei an einem USB-Anschluss hängen. Fehlertexte kommen aus `camErrText()`. Hier liegt der größte Verbesserungsbedarf, sobald echte Kamerabilder vorliegen.
 
 ## Konventionen
 

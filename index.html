@@ -453,7 +453,7 @@ details.more[open]>summary{margin-bottom:10px}
 (function(){
 'use strict';
 // Wird von scripts/build.mjs durch die Version aus package.json ersetzt
-const VERSION='1.3.4'.startsWith('__')?'Entwicklung':'1.3.4';
+const VERSION='1.3.5'.startsWith('__')?'Entwicklung':'1.3.5';
 const SEGS=[20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
 const store={
   get(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}},
@@ -2017,20 +2017,40 @@ async function camScan(){
   store.set('dart.camslots',cam.slots);
   await camStart();
 }
-async function camStart(){
-  ensureHost();
+/* Auflösung und Bildrate je Kamera. Die Erkennung rechnet ohnehin mit 320×240 und etwa 8 Bildern/s,
+   mehr kostet nur USB-Bandbreite. Hängen alle Kameras an einem Anschluss, schaltet camStart() stufenweise
+   herunter, bis alle laufen. Seitenverhältnis bleibt 4:3, Kalibrierungen gelten weiter. */
+const CAM_MODES=[{w:320,h:240,f:15},{w:320,h:240,f:10},{w:320,h:240,f:5}];
+const camModeText=m=>`${m.w}×${m.h} Pixel, ${m.f} Bilder pro Sekunde`;
+async function camOpen(m){
   cam.streams.forEach(s=>s&&s.getTracks().forEach(t=>t.stop()));
   cam.streams=[];cam.videos=[];camHost.innerHTML='';
+  const fails=[];
   for(let i=0;i<3;i++){
     const id=cam.slots[i];
     if(!id){cam.streams.push(null);cam.videos.push(null);continue;}
     try{
-      const s=await navigator.mediaDevices.getUserMedia({video:{deviceId:{exact:id},width:{ideal:640},height:{ideal:480}}});
+      const s=await navigator.mediaDevices.getUserMedia({video:{deviceId:{exact:id},width:{ideal:m.w},height:{ideal:m.h},aspectRatio:{ideal:4/3},frameRate:{ideal:m.f}}});
       const v=document.createElement('video');v.muted=true;v.playsInline=true;v.autoplay=true;v.srcObject=s;camHost.appendChild(v);
       await v.play().catch(()=>{});
       cam.streams.push(s);cam.videos.push(v);
-    }catch(e){cam.streams.push(null);cam.videos.push(null);cam.err=e&&e.name==='NotReadableError'?`Kamera ${i+1} ließ sich nicht starten. Hängen alle drei am selben USB-Anschluss, reicht die Bandbreite oft nicht. Dann einen anderen Port probieren, oder ein anderes Programm benutzt sie gerade. (${e.name})`:`Kamera ${i+1}: ${camErrText(e)}`;}
+    }catch(e){cam.streams.push(null);cam.videos.push(null);fails.push([i,e]);}
   }
+  return fails;
+}
+async function camStart(){
+  ensureHost();
+  let fails=[];
+  for(let k=0;k<CAM_MODES.length;k++){
+    fails=await camOpen(CAM_MODES[k]);cam.mode=k;
+    // nur bei Bandbreiten- oder Belegt-Fehlern lohnt eine sparsamere Stufe
+    if(!fails.some(([,e])=>e&&e.name==='NotReadableError')) break;
+  }
+  if(!fails.length) return;
+  const [i,e]=fails[0];
+  cam.err=e&&e.name==='NotReadableError'?
+    `Kamera ${i+1} startet nicht, auch nicht mit der sparsamsten Einstellung (${camModeText(CAM_MODES[cam.mode])}). Hängen alle Kameras an einem USB-Anschluss, reicht die Bandbreite nicht. Verteile sie auf verschiedene Anschlüsse, am besten einer vorne und einer hinten am PC, oder nutze einen USB-3-Hub mit eigenem Netzteil. Prüf auch, dass kein anderes Programm die Kamera benutzt. (${e.name})`:
+    `Kamera ${i+1}: ${camErrText(e)}`;
 }
 const calOf=i=>{const id=cam.slots[i];const c=id&&cam.cal[id];return c&&c.p?c:null;};
 function gray(i){
@@ -2210,6 +2230,7 @@ function renderCam(){
   app.innerHTML=`<div class="wrap">${hdr}
   <p class="muted">Drei USB-Kameras rund ums Board, etwa im 120-Grad-Abstand, knapp vor der Scheibe und flach über die Oberfläche blickend, so wie bei Autodarts. Die Erkennung läuft im Browser am PC, der Spielstand wie gewohnt. Daneben liegende Würfe korrigierst du mit „Rückgängig“ und den Tasten.</p>
   ${cam.err?`<p class="err" role="alert">${esc(cam.err)}</p>`:''}
+  ${cam.streams.some(Boolean)?`<p class="muted small">Kameras laufen mit ${camModeText(CAM_MODES[cam.mode||0])}${cam.mode?', sparsam wegen knapper USB-Bandbreite':''}.</p>`:''}
   <button class="ghost" data-act="camscan" style="margin-bottom:14px">${cam.devices.length?'Kameras neu suchen':'Kameras suchen'}</button>
   ${slots}
   ${cam.devices.length?`<section><h2>Erkennung</h2><div class="opt"><span class="olabel">Empfindlichkeit</span><div class="seg" role="group" aria-label="Empfindlichkeit">${['Niedrig','Mittel','Hoch'].map((n,i)=>`<button data-sens="${i}" class="${cam.sens===i?'on':''}" aria-pressed="${cam.sens===i}">${n}</button>`).join('')}</div></div>
@@ -2751,7 +2772,7 @@ window.pfeilerlUpdate=()=>{
   document.getElementById('updx').onclick=()=>d.remove();
 };
 
-if(typeof window.__pfeilerlTest==='function') window.__pfeilerlTest({MODES,CATS,checkout,classify,fitCal,triangulate,startGame,throwDart,nextVisit,undo,getGame:()=>game,setup,loadRecords,onlClick,tvClick,profClick,coachClick,drawStats,sv,newAchievements,gameKey,VERSION,dupName,camErrText,untrusted,validGame,validCode,mergeBackup,quickModes,rememberPlayers,addRegular,localRecs,getOnl:()=>onl,getTv:()=>tv,els:null});
+if(typeof window.__pfeilerlTest==='function') window.__pfeilerlTest({MODES,CATS,checkout,classify,fitCal,triangulate,startGame,throwDart,nextVisit,undo,getGame:()=>game,setup,loadRecords,onlClick,tvClick,profClick,coachClick,drawStats,sv,newAchievements,gameKey,VERSION,dupName,camErrText,CAM_MODES,untrusted,validGame,validCode,mergeBackup,quickModes,rememberPlayers,addRegular,localRecs,getOnl:()=>onl,getTv:()=>tv,els:null});
 applyTheme();
 renderSetup();
 })();
