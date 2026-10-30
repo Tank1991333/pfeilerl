@@ -228,7 +228,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
      if(r>170){const half=SEGS[k]>=10?4.2:2,off=Math.abs(((a-k*18+540)%360)-180);return r>182&&r<195&&off<half?[242,242,242]:[28,28,28];}
      if(r<=6.35) return [196,38,44];if(r<=15.9) return [27,117,70];
      if((r>=99&&r<=107)||r>=162) return even?[196,38,44]:[27,117,70];return even?[31,32,29]:[237,226,196];};
-   let ok3=0;const info=[];
+   let ok3=0;const info=[],prec=[];
    for(const g of [17,137,257]){
      const pr=mk(g*Math.PI/180,260,70,0.62,16/9),T=[[0,170],[170,0],[0,-170],[-170,0]].map(([X,Y])=>{const [u,v]=pr(X,Y);return [u*W,v*Hh];}),Ht=api.acH(T);
      const data=new Uint8ClampedArray(W*Hh*4);
@@ -238,9 +238,13 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
      // Fehler in mm auf dem Board bei der wahrscheinlichsten Lage, und ob die richtige unter den Kandidaten ist
      const errOf=pts=>{const H=api.acH([1,2,3,4].map(k=>[pts[k].ix*W,pts[k].iy*Hh]));let mx=0;for(let X=-150;X<=150;X+=30) for(let Y=-150;Y<=150;Y+=30){if(Math.hypot(X,Y)>170) continue;const [u,v]=api.projH(Ht,X,Y),Q=api.invH(H,u,v);mx=Math.max(mx,Math.hypot(Q[0]-X,Q[1]-Y));}return mx;};
      const best=Math.min(...r.alts.map(errOf)),first=errOf(r.pts);
-     info.push(`max ${best.toFixed(1)} mm${first<10?'':' (erst nach Würfen)'}${r.sure?', sicher':''}`);
+     info.push(`max ${best.toFixed(1)} mm, Selbstprüfung ${r.stats?r.stats.rel.toFixed(2)+' %':'–'}${first<10?'':' (erst nach Würfen)'}`);
      if(best<10) ok3++;
+     if(r.stats) prec.push(r.stats);
    }
+   const worst=k=>Math.max(...prec.map(s=>s[k]));
+   ok(prec.length===3&&worst('rel')<0.5&&worst('rad')<0.5&&worst('ang')<0.3&&worst('ctr')<0.5,'Selbstprüfung nach Kantenverfeinerung: Reprojektion < 0,5 %, Radien und Zentrum < 0,5 mm, Winkel < 0,3°',
+     prec.map(s=>`${s.rel.toFixed(2)} %, ${s.rad.toFixed(2)} mm, ${s.ang.toFixed(2)}°, ${s.ctr.toFixed(2)} mm`).join(' | '));
    ok(ok3===3,'Drei simulierte Kameras ohne Klicken kalibriert, richtige Lage unter den Kandidaten (Würfe klären sie)',info.join(' | '));}
 
   console.log(`\n${passed} bestanden, ${failed} fehlgeschlagen`);
