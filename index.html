@@ -11,6 +11,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" href="icon-192.png">
+<meta name="description" content="Pfeilerl zählt Dart ganz ohne Kopfrechnen: X01, Cricket und 17 weitere Spielmodi, Computer-Gegner, Statistik, Turnier und Kamera-Erkennung. Kostenlos, ohne Konto, läuft offline.">
 <link rel="preload" href="fonts/barlow-400.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="fonts/barlow-condensed-700.woff2" as="font" type="font/woff2" crossorigin>
 <style>
@@ -445,6 +446,12 @@ details.more[open]>summary{margin-bottom:10px}
   .camgrid .camslot{margin:0}
   .wrap.camwide .calcv{max-height:78vh;width:auto;max-width:100%;margin-left:auto;margin-right:auto}
 }
+.rotcheck{display:flex;flex-direction:column;gap:6px;background:color-mix(in srgb,var(--yellow) 18%,var(--surface));border:1px solid var(--yellow);border-radius:10px;padding:10px 12px;margin:0 0 14px}
+.camsteps{margin:0 0 14px;padding:10px 12px 10px 32px;background:var(--surface);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;gap:4px}
+.camsteps li.done{color:var(--muted)}
+.linkbtn{background:none;border:0;padding:6px 2px;color:inherit;font:inherit;text-decoration:underline;text-underline-offset:3px;min-height:44px}
+.legal h3{font-size:16px;margin:16px 0 4px}
+.legal p{margin:0 0 10px;line-height:1.55}
 /* Overlays bleiben auf niedrigen Bildschirmen scrollbar */
 .ov{overflow-y:auto;place-items:start center}
 .ovcard{margin:auto 0}
@@ -458,11 +465,12 @@ details.more[open]>summary{margin-bottom:10px}
 </head>
 <body>
 <main id="app"></main>
+<noscript><p style="padding:16px;font-family:sans-serif">Pfeilerl braucht JavaScript. Bitte aktiviere es in deinem Browser.</p></noscript>
 <script>
 (function(){
 'use strict';
 // Wird von scripts/build.mjs durch die Version aus package.json ersetzt
-const VERSION='1.6.0'.startsWith('__')?'Entwicklung':'1.6.0';
+const VERSION='1.7.0'.startsWith('__')?'Entwicklung':'1.7.0';
 const SEGS=[20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
 const store={
   get(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}},
@@ -470,6 +478,18 @@ const store={
   del(k){try{localStorage.removeItem(k)}catch(e){}}
 };
 const clone=o=>JSON.parse(JSON.stringify(o));
+/* Fehlerprotokoll: die letzten 30 unerwarteten Fehler bleiben lokal gespeichert und kommen mit der Datensicherung mit */
+function logError(msg,src){
+  const a=store.get('dart.errors')||[];
+  a.push({ts:Date.now(),v:VERSION,msg:String(msg||'').slice(0,300),src:String(src||'').slice(0,120)});
+  store.set('dart.errors',a.slice(-30));
+}
+if(typeof window.addEventListener==='function'){
+  window.addEventListener('error',e=>logError(e.message,(e.filename||'')+':'+(e.lineno||'')));
+  window.addEventListener('unhandledrejection',e=>logError(e.reason&&e.reason.message||e.reason,'Promise'));
+}
+/* Impressum (Offenlegung nach § 25 MedienG), vom Build aus package.json eingesetzt */
+const IMPRESSUM={};
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 /* Fremde Daten (Online-Gegner, großer Bildschirm, Datenbank, Sicherungsdatei) bereinigen, bevor sie
    irgendwo landen: Texte ohne < > " und Backtick, nur endliche Zahlen, keine Prototyp-Schlüssel, begrenzte Tiefe */
@@ -485,6 +505,10 @@ function untrusted(v,d=0){
   return o;
 }
 const validCode=c=>/^[A-Z0-9]{5}$/.test(c);
+/* Spielcode aus kryptografischem Zufall (32 Zeichen ohne leicht verwechselbare wie 0/O, 1/I) */
+const CODE_CHARS='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function makeCode(){const b=new Uint8Array(5);(window.crypto||{}).getRandomValues?crypto.getRandomValues(b):b.forEach((_,k)=>{b[k]=Math.random()*256;});return Array.from(b,v=>CODE_CHARS[v%32]).join('');}
+const ONL_MAX_AGE=24*3600*1000;
 const fmt=n=>(Math.round(n*10)/10).toFixed(1).replace('.',',');
 const val=d=>d.seg*d.mult;
 const label=d=>{
@@ -1167,10 +1191,10 @@ function renderSetup(){
   <section><h2>Dart-Sets</h2>${setup.sets.length?`<ul class="sets">${setup.sets.map(st=>`<li><span>${esc(setLabelS(st))}</span><button class="icon" data-delset="${st.id}" aria-label="Set ${esc(st.name)} löschen">✕</button></li>`).join('')}</ul>`:'<p class="muted">Lege deine Pfeile an und wähle sie im Spielerprofil (⚙). Die Statistik vergleicht dann, mit welchem Set du besser triffst.</p>'}
   <div class="setrow"><input id="setname" value="${esc(setDraft.n)}" placeholder="Name, z. B. Blaue 22er" maxlength="24" aria-label="Name des Sets"><input id="setw" value="${esc(setDraft.w)}" inputmode="decimal" placeholder="Gramm" maxlength="5" aria-label="Gewicht in Gramm"><button class="ghost" data-act="addset">Anlegen</button></div>${moreErr&&moreErr.where==='sets'?`<p class="err" role="alert">${esc(moreErr.text)}</p>`:''}</section>
   <section><h2>Stammspieler</h2>${setup.regulars.length?`<ul class="sets">${setup.regulars.map(r=>`<li><span>${esc(r.name)}</span><button class="icon" data-delreg="${esc(r.name)}" aria-label="${esc(r.name)} aus den Stammspielern entfernen">✕</button></li>`).join('')}</ul>`:'<p class="muted">Wer mitspielt, landet automatisch hier. Danach reicht ein Tipp auf den Namen, Spitzname, Dart-Set und Einlauf kommen mit.</p>'}</section>
-  <section><h2>Datensicherung</h2><p class="muted">Sichere Statistik, Stammspieler und Dart-Sets als Datei, etwa vor einem Handywechsel. Beim Wiederherstellen kommen nur fehlende Spiele dazu, nichts wird überschrieben.</p>
+  <section><h2>Datensicherung</h2><p class="muted">Sichere Statistik, Stammspieler und Dart-Sets als Datei, etwa vor einem Handywechsel. Beim Wiederherstellen kommen nur fehlende Spiele dazu, nichts wird überschrieben.${(store.get('dart.errors')||[]).length?` Die Sicherung enthält auch das Fehlerprotokoll (${(store.get('dart.errors')||[]).length} Einträge), das hilft bei der Fehlersuche.`:''}</p>
   <div class="addrow"><button class="ghost" data-act="backup">Sicherung speichern</button><label class="ghost filebtn">Sicherung einspielen<input type="file" accept=".json,application/json" id="restore" class="vh"></label></div>${setupMsg?`<p class="okmsg" role="status">${esc(setupMsg)}</p>`:''}${moreErr&&moreErr.where==='backup'?`<p class="err" role="alert">${esc(moreErr.text)}</p>`:''}</section>
   </details>
-  <p class="ver">Pfeilerl Version ${VERSION}</p>
+  <p class="ver">Pfeilerl Version ${VERSION}, <button class="linkbtn" data-act="legal">Impressum und Datenschutz</button></p>
   </div>`;
   setupMsg='';moreErr='';
 }
@@ -1207,10 +1231,29 @@ function addRegular(name){
   const i=setup.players.findIndex(p=>!p.bot&&isDefaultName(p.name));
   if(i>=0) setup.players[i]=clone(r); else setup.players.push(clone(r));
 }
+/* Impressum und Datenschutz */
+function renderLegal(){
+  const I=IMPRESSUM||{},has=!!(I.name&&I.ort);
+  app.innerHTML=`<div class="wrap legal"><header class="gbar"><h1 class="gmode">Impressum und Datenschutz</h1><button class="ghost" data-act="back">Zurück</button></header>
+  ${has?`<section><h2>Impressum</h2><p>Offenlegung nach § 25 Mediengesetz<br>Medieninhaber und Betreiber: ${esc(I.name)}, ${esc(I.ort)}${I.email?`<br>Kontakt: ${esc(I.email)}`:''}<br>Grundlegende Richtung: privates, nicht kommerzielles Hilfsmittel zum Zählen beim Dartspielen.</p></section>`:''}
+  <section><h2>Datenschutz</h2>
+  <p><b>Kurz gesagt:</b> Pfeilerl hat keine Benutzerkonten, setzt keine Cookies und verwendet keine Analyse- oder Werbedienste. Deine Daten bleiben auf deinem Gerät.</p>
+  <h3>Was auf deinem Gerät gespeichert wird</h3>
+  <p>Spielernamen, Spitznamen, Spielstände, Statistik, Dart-Sets, Einstellungen und die Kamera-Kalibrierung liegen im Speicher deines Browsers (localStorage), eigene Einlaufmusik in IndexedDB. Nichts davon wird an uns übertragen. Du kannst alles löschen, indem du die Website-Daten von Pfeilerl im Browser löschst. Mit „Sicherung speichern“ legst du selbst eine Datei an, die du weitergeben kannst.</p>
+  <h3>Kameras</h3>
+  <p>Die Kamerabilder werden ausschließlich in deinem Browser ausgewertet. Sie werden weder übertragen noch gespeichert, außer du speicherst sie selbst mit „Kamerabilder speichern“.</p>
+  <h3>Hosting</h3>
+  <p>Die Website wird von Vercel Inc. (USA) ausgeliefert. Beim Aufruf verarbeitet Vercel technisch notwendige Daten wie IP-Adresse, Zeitpunkt und abgerufene Datei, um die Seite auszuliefern und vor Missbrauch zu schützen (berechtigtes Interesse, Art. 6 Abs. 1 lit. f DSGVO). Näheres in der Datenschutzerklärung von Vercel. Schriften und alle anderen Dateien kommen von derselben Adresse, es gibt keine Verbindungen zu Google oder anderen Dritten.</p>
+  <h3>Online-Spiele, Bildschirm und KI-Trainer</h3>
+  <p>Diese Funktionen gibt es nur in der Fassung auf claude.ai. Dort werden die Spielstände von Online-Spielen samt Spielernamen in der Datenbank des Artifacts gespeichert und gelöscht, wenn der Gastgeber das Spiel beendet, spätestens nach 24 Stunden nicht mehr verwendet. Es gelten zusätzlich die Bestimmungen von Anthropic.</p>
+  <h3>Deine Rechte</h3>
+  <p>Da wir keine personenbezogenen Daten von dir speichern, kannst du die Daten auf deinem Gerät jederzeit selbst einsehen und löschen. Für Fragen zu den Server-Protokollen wende dich an Vercel. Beschwerden kannst du bei der Datenschutzbehörde einbringen (dsb.gv.at).</p></section></div>`;
+  window.scrollTo(0,0);
+}
 /* Datensicherung als JSON-Datei */
 const nGames=n=>n===1?'1 Spiel':n+' Spiele';
 async function backupData(){
-  const data={app:'pfeilerl',format:1,version:VERSION,ts:Date.now(),records:await loadRecords(),sets:setup.sets,regulars:setup.regulars,coach:store.get('dart.coach')};
+  const data={app:'pfeilerl',format:1,version:VERSION,ts:Date.now(),errors:store.get('dart.errors')||[],records:await loadRecords(),sets:setup.sets,regulars:setup.regulars,coach:store.get('dart.coach')};
   const day=new Date().toISOString().slice(0,10);
   try{
     const blob=new Blob([JSON.stringify(data)],{type:'application/json'});
@@ -1930,6 +1973,9 @@ async function onlSubscribe(){
 }
 function onlLeave(){
   if(onl&&onl.unsub) try{onl.unsub();}catch(e){}
+  // Gastgeber räumt auf: Namen und Spielstand bleiben nicht in der gemeinsamen Datenbank liegen
+  const code=onl&&onl.host?onl.code:(scr&&scr.code&&!onl?scr.code:null);
+  if(code) getDbNs().then(db=>{if(db) return db.doc('online/'+code).delete();}).catch(()=>{});
   onl=null;onlRev=0;store.del('dart.online');
 }
 async function renderOnline(){
@@ -1965,7 +2011,10 @@ async function onlClick(t){
     const m=MODES[setup.mode];
     if(setup.players.length<2){onlView.err='Ein Online-Spiel braucht mindestens 2 Spieler.';renderOnline();return;}
     if(m.minPlayers&&setup.players.length<m.minPlayers){onlView.err=`${m.name} braucht mindestens ${m.minPlayers} Spieler.`;renderOnline();return;}
-    const code=Array.from({length:5},()=>'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random()*32)]).join('');
+    // freien Code suchen: belegt ist er nur, wenn dort ein Spiel der letzten 24 Stunden liegt
+    let code='';
+    try{const db=await getDbNs();for(let k=0;k<6&&!code;k++){const c=makeCode(),sn=db?await db.doc('online/'+c).get():null;const d=sn&&sn.exists?sn.data():null;if(!d||!(Date.now()-(d.ts||0)<ONL_MAX_AGE)) code=c;}}catch(e){}
+    if(!code) code=makeCode();
     onl={code,name:'',host:true};onlRev=0;
     startGame(false);
     onl.name=game.players[onlView.seat].name;game.online=code;
@@ -1979,7 +2028,7 @@ async function onlClick(t){
     try{
       const db=await getDbNs();
       const snap=await db.doc('online/'+code).get();
-      if(!snap.exists){onlView.err='Kein Spiel mit diesem Code gefunden.';renderOnline();return;}
+      if(!snap.exists||!(Date.now()-((snap.data()||{}).ts||0)<ONL_MAX_AGE)){onlView.err='Kein laufendes Spiel mit diesem Code gefunden.';renderOnline();return;}
       const d=snap.data(),st=untrusted(JSON.parse(d.state));if(!st||!validGame(st.g)){onlView.err='Dieses Spiel ist beschädigt und lässt sich nicht öffnen.';renderOnline();return;}onlView.st=st;onlView.rev=typeof d.rev==='number'?d.rev:0;onlView.code=code;onlView.step='seat';renderOnline();
     }catch(e){onlView.err='Beitreten hat nicht geklappt. Prüfe, ob der Link mit dir geteilt wurde.';renderOnline();}
     return;
@@ -1992,6 +2041,8 @@ async function onlClick(t){
   }
 }
 
+// Kamera-Erkennung von Pfeilerl. scripts/build.mjs und die Tests setzen diese Datei in src/app.js an der
+// Platzhalter-Stelle CAMERA ein, sie läuft im selben Gültigkeitsbereich wie der Rest der App.
 /* ---------- Kamera ---------- */
 const CAL_PTS=[['die Mitte des Bulls',0,0],['den äußeren Draht der Double 20, in der Mitte des Feldes',0,170],['den äußeren Draht der Double 6, in der Mitte des Feldes',170,0],['den äußeren Draht der Double 3, in der Mitte des Feldes',0,-170],['den äußeren Draht der Double 11, in der Mitte des Feldes',-170,0]];
 /* Auflösungen wie bei Autodarts. Die Kameras liefern dabei meist MJPEG, so passen auch drei an einen USB-Anschluss. */
@@ -2007,7 +2058,7 @@ const saveCamSet=()=>store.set('dart.camset',{sens:cam.sens,thr:cam.thr,margin:c
 let camHost=null,work=null,wctx=null;
 function ensureHost(){
   if(camHost) return;
-  camHost=document.createElement('div');camHost.style.cssText='position:fixed;left:0;top:0;width:2px;height:2px;overflow:hidden;opacity:0;pointer-events:none';
+  camHost=document.createElement('div');camHost.setAttribute('aria-hidden','true');camHost.style.cssText='position:fixed;left:0;top:0;width:2px;height:2px;overflow:hidden;opacity:0;pointer-events:none';
   document.body.appendChild(camHost);
   work=document.createElement('canvas');work.width=CW;work.height=CH;wctx=work.getContext('2d',{willReadFrequently:true});
 }
@@ -2078,8 +2129,8 @@ async function camStart(){
   const v=cam.videos.find(Boolean);
   if(v){await new Promise(r=>{if(v.videoWidth) r();else{v.onloadedmetadata=()=>r();setTimeout(r,1500);}});if(v.videoWidth) setWork(v.videoWidth/v.videoHeight);}
   clearInterval(cam.sbTimer);cam.sbTimer=setInterval(standbyCheck,30000);
-  clearInterval(cam.healTimer);cam.healTimer=setInterval(selfHeal,5000);
-  setTimeout(async()=>{if(cam.check||cam.autocal) checkMoved();if(cam.autocal) await camAutoAll(true);},1500);
+  clearInterval(cam.healTimer);cam.healTimer=setInterval(()=>selfHeal(false),2000);
+  setTimeout(async()=>{if(cam.autocal) await camAutoAll(true);await selfHeal(true);},1500);
   if(!fails.length) return;
   const [i,e]=fails[0];
   cam.err=e&&e.name==='NotReadableError'?
@@ -2101,16 +2152,18 @@ function standbyCheck(){
   if(Date.now()-cam.lastAct<cam.standby*60000) return;
   clearInterval(cam.timer);cam.timer=null;camStop();cam.sleeping=true;cam.last='Kameras im Standby, sie starten mit dem nächsten Spiel wieder';
 }
-/* Selbstheilung alle 5 Sekunden, solange gerade kein Dart erkannt wird: Geometrie an den Drähten messen.
+/* Selbstheilung alle 2 Sekunden je eine Kamera (jede also alle 6 s), solange gerade kein Dart erkannt wird: Geometrie an den Drähten messen.
    Kleine Abweichung: sanft nachführen. Kamera bewegt: automatisch neu kalibrieren (Lage der 20 bleibt).
    Dazu Hinweise bei Unschärfe und stark verändertem Licht. */
-async function selfHeal(){
+async function selfHeal(all){
   if(cam.sleeping||cam.busy||cam.calSlot>=0||cam.state!=='idle'||cam.healing||!cam.streams.some(Boolean)) return;
   cam.healing=true;let changed=false;
+  // Je Durchgang nur eine Kamera (reihum) in 960 Pixel Breite, damit die Oberfläche nicht ruckelt
+  const list=all?[0,1,2]:[cam.healIdx=((cam.healIdx??-1)+1)%3];
   try{
-    for(let i=0;i<3;i++){
+    for(const i of list){
       const c=calOf(i);if(!c||!c.H) continue;
-      const img=frameImage(i,0);if(!img) continue;
+      const img=frameImage(i,960);if(!img) continue;
       const E=edgePrep(img),Hpx=hScale(c.H,img.width,img.height),C=edgeMeasure(E,Hpx),st=edgeStats(C,Hpx),br=boardBright(E,Hpx);
       if(!c.stats0){c.stats0=c.stats||st;c.stats=c.stats||st;c.sharp=c.sharp||st.sharp;c.bright=c.bright||br;store.set('dart.camcal',cam.cal);continue;}
       // Maßstab bleibt die Messung direkt nach der Kalibrierung (stats0), damit sich Abweichungen nicht einschleichen
@@ -2644,9 +2697,22 @@ function locate(tips){
   // die Drehung der Kameras zueinander. Unter den Zwillingen entscheidet die Zahlenerkennung aller Kameras (prior).
   const tots=[...rotAcc.sums.values()].sort((a,b)=>a-b),b0=tots[0],tw=b0+Math.max(2,0.5*rotAcc.n);
   const other=tots.find(t=>t>tw);
-  lastChoice={tips,ch:best.ch,n:rotAcc.n,best:b0,second:other==null?Infinity:other};
+  // wie klar entscheidet die Zahlenerkennung zwischen den Zwillingen?
+  const twinPri=[...rotAcc.sums.entries()].filter(([,t])=>t<=tw).map(([id])=>prior(id.split(',').map(Number))).sort((a,b)=>a-b);
+  lastChoice={tips,ch:best.ch,n:rotAcc.n,best:b0,second:other==null?Infinity:other,twinMargin:twinPri.length>1?twinPri[1]-twinPri[0]:Infinity};
   return best.P;
 }
+/* Ist die Lage der 20 noch nicht bestätigt (offen oder nur knapp aus den Zahlen)? */
+const rotPending=()=>[0,1,2].some(i=>{const c=calOf(i);return c&&(Array.isArray(c.alts)||c.globUnsure);});
+/* Alle Kameras gemeinsam um 36° weiterdrehen (zwei Segmente): Notkorrektur, wenn die 20 im Raster falsch liegt */
+function rotateAll(deg){
+  const a=deg*Math.PI/180;
+  [0,1,2].forEach(i=>{const c=calOf(i);if(!c||!c.H) return;
+    const pts=CAL_PTS.map(([,X,Y])=>{const [u,v]=projH(c.H,X*Math.cos(a)+Y*Math.sin(a),-X*Math.sin(a)+Y*Math.cos(a));return {X,Y,ix:u,iy:v};});
+    Object.assign(c,fitCal(pts),{pts,unsure:false,globUnsure:true});delete c.alts;delete c.altCorr;});
+  rotAcc.key='';cam.masks=[];store.set('dart.camcal',cam.cal);
+}
+function confirmRotation(){[0,1,2].forEach(i=>{const c=calOf(i);if(c){delete c.globUnsure;delete c.alts;delete c.altCorr;c.unsure=false;}});store.set('dart.camcal',cam.cal);}
 /* Nach mindestens drei Würfen mit klarem Vorsprung wird die Lage übernommen */
 function voteRotation(){
   const L=lastChoice;
@@ -2656,7 +2722,8 @@ function voteRotation(){
     if(!Array.isArray(c.alts)) return;
     const wasUnsure=c.unsure||L.ch[i]!==0;
     const j=L.ch[i],pts=c.alts[j];
-    Object.assign(c,fitCal(pts),{pts,unsure:false});delete c.alts;delete c.altCorr;if(wasUnsure) done=true;
+    // Gemeinsame Drehung nur aus den Zahlen: bei knappem Vorsprung zur Prüfung vormerken
+    Object.assign(c,fitCal(pts),{pts,unsure:false,globUnsure:L.twinMargin<4});delete c.alts;delete c.altCorr;if(wasUnsure) done=true;
   });
   rotAcc.key='';cam.masks=[];store.set('dart.camcal',cam.cal);
   return done?'Lage der 20 durch die Würfe geklärt':'';
@@ -2667,8 +2734,9 @@ function camTick(){
   const frames=[0,1,2].map(i=>ids.includes(i)?gray(i):null);
   const live=frames.filter(Boolean).length;
   if(live<2&&!(live===1&&calOf(frames.findIndex(Boolean)).angled)) return;
-  // Schwellen in Pixeln der Rechenauflösung (480 breit): ab so vielen veränderten Pixeln gilt ein Dart als gelandet
-  const TH=[180,110,60][cam.sens]*CW*CH/129600,HAND=0.12;
+  // Schwelle in Pixeln der Rechenauflösung (480 breit): passt sich dem Bildrauschen in Ruhe an (cam.noise),
+  // damit auch kleine, weit entfernte Darts zählen, Flimmern aber nicht
+  const sc=CW*CH/129600,TH=Math.max([60,35,20][cam.sens]*sc,(cam.noise||0)*4+8*sc),HAND=0.12;
   let mxR=0,mxM=0,mxF=0;
   frames.forEach((f,i)=>{
     if(!f) return;const m=maskOf(i);
@@ -2678,6 +2746,7 @@ function camTick(){
     cam.prev[i]=f;
   });
   if(cam.state==='idle'){
+    if(mxR<=TH) cam.noise=(cam.noise||0)*0.95+mxR*0.05;
     if(mxR>TH){cam.state='moving';cam.still=0;camTouch();}
     else if(++cam.idle>40){cam.idle=0;frames.forEach((f,i)=>{if(f) cam.ref[i]=f;});}
     return;
@@ -2702,7 +2771,7 @@ function camTick(){
     if(P){
       cam.lastP=P;drawMiniBoard();
       const d=classify(P[0],-P[1]),note=voteRotation();
-      cam.last='Erkannt: '+(d.mult?label(d):'daneben')+(note?', '+note:'');
+      cam.last='Erkannt: '+(d.mult?label(d):'daneben')+(note?', '+note:'')+(rotPending()?' (bitte prüfen, Lage der 20 noch nicht bestätigt)':'');
       if(camAllowed()) throwDart(d);
     }else cam.last='Dart nicht eindeutig erkannt, bitte per Taste eingeben';
     resetRef();
@@ -2724,7 +2793,9 @@ function drawOverlay(x,H,w,h,color){
   const pt=(r,a)=>{const [u,v]=projH(H,r*Math.sin(a),r*Math.cos(a));return [u*w,v*h];};
   [170,162,107,99,15.9,6.35].forEach(r=>{x.beginPath();for(let k=0;k<=72;k++){const [px,py]=pt(r,k*5*Math.PI/180);k?x.lineTo(px,py):x.moveTo(px,py);}x.stroke();});
   for(let k=0;k<20;k++){const a=(k*18+9)*Math.PI/180,[ax,ay]=pt(15.9,a),[bx,by]=pt(170,a);x.beginPath();x.moveTo(ax,ay);x.lineTo(bx,by);x.stroke();}
-  const [tx,ty]=pt(185,0);x.fillStyle=color||'rgba(47,224,192,.95)';x.font=`bold ${Math.max(10,w/40)}px sans-serif`;x.textAlign='center';x.textBaseline='middle';x.fillText('20',tx,ty);
+  // die 20 groß und mit Kontur, damit man sofort sieht, ob die Lage stimmt
+  const [tx,ty]=pt(190,0);x.font=`bold ${Math.max(14,w/22)}px sans-serif`;x.textAlign='center';x.textBaseline='middle';
+  x.lineWidth=Math.max(3,w/160);x.strokeStyle='rgba(0,0,0,.8)';x.strokeText('20',tx,ty);x.fillStyle=color||'rgba(47,224,192,1)';x.fillText('20',tx,ty);
   x.restore();
 }
 function camPreview(){
@@ -2859,7 +2930,13 @@ async function camAutoAll(onlyNeeded){
     cam.busy=`Kalibriere Kamera ${i+1} …`;if(document.getElementById('camprev0')) renderCam();
     await new Promise(r=>setTimeout(r,30));
     const r=await camAutoCal(i,{keepRot:onlyNeeded&&!!cam.cal[cam.slots[i]]});
-    msg.push(r.ok?`Kamera ${i+1} kalibriert, ${r.stats.rel.toFixed(2).replace('.',',')} %${r.stats.rel<CAL_OK?'':' (knapp)'}${r.sure?'':', Lage der 20 klären die ersten Würfe'}`:`Kamera ${i+1}: ${r.why}`);
+    msg.push(r.ok?`Kamera ${i+1} kalibriert, ${r.stats.rel.toFixed(2).replace('.',',')} %${r.stats.rel<CAL_OK?'':' (knapp)'}`:`Kamera ${i+1}: ${r.why}`);
+  }
+  const cal=[0,1,2].map(calOf).filter(Boolean);
+  if(cal.length&&cal.length<3){
+    // zwei Geraden schneiden sich immer: die Lage der 20 lässt sich nur aus den Zahlen bestimmen
+    cal.forEach(c=>{if(Array.isArray(c.alts)){c.globUnsure=true;delete c.alts;delete c.altCorr;}});store.set('dart.camcal',cam.cal);
+    msg.push('Mit weniger als drei Kameras lässt sich die Lage der 20 nicht per Wurf prüfen, bitte am Raster kontrollieren');
   }
   cam.busy='';cam.last=msg.join('. ');
   if(document.getElementById('camprev0')||document.querySelector('.camgrid')) renderCam();
@@ -2910,34 +2987,45 @@ function renderCam(){
     ${stale?'<p class="muted small">Die Auflösung hat ein anderes Seitenverhältnis als bei der Kalibrierung.</p>':''}
     ${ok&&cc.stats?`<p class="${cc.stats.rel<CAL_OK?'muted':'warnt'} small">${statText(cc.stats)}</p>`:''}
     ${cam.health[i]?`<p class="warnt small">${esc(cam.health[i])}</p>`:''}
-    ${ok&&cc.unsure?'<p class="warnt small">Die Lage der 20 ist noch unsicher. Die ersten Würfe klären das automatisch, dafür sollten alle drei Kameras laufen.</p>':''}
+    ${ok&&Array.isArray(cc.alts)?'<p class="muted small">Lage der 20: wird mit den ersten Würfen bestätigt.</p>':''}
     <label class="olabel" for="camdev${i}">Gerät</label><select id="camdev${i}" class="pinput" data-camdev="${i}"><option value="">Keine Kamera</option>${cam.devices.map((d,j)=>`<option value="${j}" ${cam.slots[i]===d.id?'selected':''}>${esc(d.label)}</option>`).join('')}</select>
     ${cam.diag&&ok?`<p class="diagl" id="camdiag${i}">Diagnose läuft …</p>`:''}
     <div class="addrow"><button class="ghost" data-acal="${i}" ${cam.videos[i]&&!cam.busy?'':'disabled'}>Automatisch</button><button class="ghost" data-cal="${i}" ${cam.videos[i]?'':'disabled'}>Von Hand</button></div></div>`;}).join(''):'';
   const anyFlat=[0,1,2].some(i=>calOf(i)&&!calOf(i).angled);
+  const nCal=[0,1,2].filter(i=>calOf(i)).length;
+  // Checkliste, solange noch nicht alles läuft
+  const steps=[['Autodarts und andere Kamera-Programme ganz schließen (auch unten rechts im Infobereich), eine Kamera kann nur ein Programm benutzen',cam.devices.length>0],
+    ['Darts aus dem Board nehmen und für gleichmäßiges Licht sorgen',nCal>0],
+    ['„Kameras suchen“: die App findet und kalibriert sie automatisch',nCal>=Math.min(3,cam.devices.length||3)]];
+  const checklist=nCal>=3&&!rotPending()?'':`<ol class="camsteps">${steps.map(([t,d])=>`<li class="${d?'done':''}">${d?'✓ ':''}${t}</li>`).join('')}</ol>`;
   app.innerHTML=`<div class="wrap camwide">${hdr}
-  <p class="muted">Drei USB-Kameras am Ring rund ums Board, etwa im 120-Grad-Abstand, schräg auf die Scheibe blickend, so wie bei Autodarts. Die Erkennung läuft im Browser am PC. Wichtig: Autodarts und andere Kamera-Programme vorher ganz schließen, eine Kamera kann immer nur ein Programm benutzen. Daneben liegende Würfe korrigierst du mit „Rückgängig“ und den Tasten.</p>
+  ${checklist}
   ${cam.err?`<p class="err" role="alert">${esc(cam.err)}</p>`:''}
   ${cam.sleeping?'<p class="muted">Kameras im Standby, sie starten gleich wieder.</p>':''}
-  ${cam.mode&&cam.streams.some(Boolean)?`<p class="muted small">Angefordert: ${camModeText(cam.mode)}${cam.modeStep?', sparsamer wegen knapper USB-Bandbreite':''}.</p>`:''}
   ${cam.busy?`<p class="camline" role="status">${esc(cam.busy)}</p>`:''}
-  <div class="addrow" style="margin-bottom:14px"><button class="ghost" data-act="camscan">${cam.devices.length?'Kameras neu suchen':'Kameras suchen'}</button>${cam.devices.length?`<button class="primary" data-act="camautoall" ${cam.busy?'disabled':''}>Alle automatisch kalibrieren</button>`:''}</div>
-  ${cam.devices.length?'<p class="muted small">Zum Kalibrieren alle Darts aus dem Board nehmen. Die App findet Ringe und Zahlen selbst, das grüne Raster zeigt das Ergebnis.</p>':''}
+  ${[0,1,2].some(i=>{const c=calOf(i);return c&&c.globUnsure;})?`<div class="rotcheck" role="status"><b>Steht die große 20 im grünen Raster dort, wo am Board die 20 ist?</b><span class="muted small">Die Lage der 20 kommt aus den Zahlen am Rand und ist nicht ganz sicher.</span><div class="addrow"><button class="primary sm" data-act="rotok">Passt</button><button class="ghost" data-act="rotnext">Die 20 liegt woanders</button></div></div>`:''}
+  <div class="addrow" style="margin-bottom:14px"><button class="${cam.devices.length?'ghost':'primary'}" data-act="camscan">${cam.devices.length?'Kameras neu suchen':'Kameras suchen'}</button>${cam.devices.length?`<button class="ghost" data-act="camautoall" ${cam.busy?'disabled':''}>Alle neu kalibrieren</button>`:''}</div>
   <div class="camgrid">${slots}</div>
-  <section><h2>Kameraeinstellungen</h2>
+  ${cam.devices.length?`<button class="primary start" data-act="camtoggle">${cam.active?'Erkennung stoppen':'Erkennung starten'}</button>
+  <p class="camline" id="camstat">${esc(cam.last||'Noch kein Wurf erkannt')}</p>
+  <figure class="heat"><canvas id="camboard" class="camboard" width="220" height="220" aria-label="Zuletzt erkannte Position"></canvas><figcaption>Zuletzt erkannte Position am Board</figcaption></figure>`:''}
+  <details class="more" id="camadv" ${cam.advOpen?'open':''}><summary>Erweitert: Auflösung, Empfindlichkeit, Diagnose</summary>
+  ${cam.mode&&cam.streams.some(Boolean)?`<p class="muted small">Angefordert: ${camModeText(cam.mode)}${cam.modeStep?', sparsamer wegen knapper USB-Bandbreite':''}.</p>`:''}
+  <section><h2>Kameras</h2>
   <div class="opt"><span class="olabel">Auflösung</span>${segBtns('data-cres',CAM_RES.map((r,k)=>[k,r.n]),cam.res,'Auflösung')}</div>
   <div class="opt"><span class="olabel">Bilder pro Sekunde</span>${segBtns('data-cfps',CAM_FPS.map(f=>[f,String(f)]),cam.fps,'Bilder pro Sekunde')}</div>
-  <div class="opt"><span class="olabel">Erkennungsgeschwindigkeit</span>${segBtns('data-cspeed',CAM_SPEED.map((s,k)=>[k,s[0]]),cam.speed,'Erkennungsgeschwindigkeit')}</div>
   <div class="opt"><span class="olabel">Kameras in Standby nach</span>${segBtns('data-cstby',CAM_STANDBY,cam.standby,'Standby')}</div>
   <div class="opt"><span class="olabel">Beim Start automatisch kalibrieren (neue und verrutschte Kameras)</span>${segBtns('data-cauto',[[false,'Aus'],[true,'An']],cam.autocal,'Beim Start automatisch kalibrieren')}</div></section>
-  ${cam.devices.length?`<section><h2>Erkennung</h2><div class="opt"><span class="olabel">Empfindlichkeit</span><div class="seg" role="group" aria-label="Empfindlichkeit">${['Niedrig','Mittel','Hoch'].map((n,i)=>`<button data-sens="${i}" class="${cam.sens===i?'on':''}" aria-pressed="${cam.sens===i}">${n}</button>`).join('')}</div></div>
+  <section><h2>Erkennung</h2>
+  <div class="opt"><span class="olabel">Erkennungsgeschwindigkeit</span>${segBtns('data-cspeed',CAM_SPEED.map((s,k)=>[k,s[0]]),cam.speed,'Erkennungsgeschwindigkeit')}</div>
+  <div class="opt"><span class="olabel">Empfindlichkeit</span><div class="seg" role="group" aria-label="Empfindlichkeit">${['Niedrig','Mittel','Hoch'].map((n,i)=>`<button data-sens="${i}" class="${cam.sens===i?'on':''}" aria-pressed="${cam.sens===i}">${n}</button>`).join('')}</div></div>
   <div class="opt"><span class="olabel">Helligkeitsschwelle</span><div class="seg" role="group" aria-label="Helligkeitsschwelle">${[[18,'Fein'],[28,'Normal'],[40,'Grob']].map((c,i)=>`<button data-thr="${i}" class="${cam.thr===c[0]?'on':''}" aria-pressed="${cam.thr===c[0]}">${c[1]}</button>`).join('')}</div></div>
-  ${anyFlat?`<div class="opt"><span class="olabel">Erkennungsbereich um die Board-Oberfläche (flache Kameras)</span><div class="seg" role="group" aria-label="Erkennungsbereich">${[[0.06,'Schmal'],[0.12,'Mittel'],[0.2,'Breit']].map((c,i)=>`<button data-mg="${i}" class="${cam.margin===c[0]?'on':''}" aria-pressed="${cam.margin===c[0]}">${c[1]}</button>`).join('')}</div></div>`:''}
-  <div class="addrow" style="margin-bottom:12px"><button class="ghost" data-act="camdiag">${cam.diag?'Diagnose aus':'Diagnose an'}</button><button class="ghost" data-act="camref">Referenzbild neu setzen</button><button class="ghost" data-act="camsave">Kamerabilder speichern</button></div>
+  ${anyFlat?`<div class="opt"><span class="olabel">Erkennungsbereich um die Board-Oberfläche (flache Kameras)</span><div class="seg" role="group" aria-label="Erkennungsbereich">${[[0.06,'Schmal'],[0.12,'Mittel'],[0.2,'Breit']].map((c,i)=>`<button data-mg="${i}" class="${cam.margin===c[0]?'on':''}" aria-pressed="${cam.margin===c[0]}">${c[1]}</button>`).join('')}</div></div>`:''}</section>
+  <section><h2>Fehlersuche</h2>
+  <div class="addrow" style="margin-bottom:12px"><button class="ghost" data-act="camdiag">${cam.diag?'Diagnose aus':'Diagnose an'}</button><button class="ghost" data-act="camref">Referenzbild neu setzen</button><button class="ghost" data-act="camsave" ${cam.devices.length?'':'disabled'}>Kamerabilder speichern</button></div>
   ${cam.diag?'<p class="muted">Rot zeigt Veränderungen zum Referenzbild im Suchbereich, der gelbe Punkt die gefundene Dartspitze. Ohne Wurf sollte kaum Rot zu sehen sein.</p>':''}
-  <button class="primary start" data-act="camtoggle">${cam.active?'Erkennung stoppen':'Erkennung starten'}</button>
-  <p class="camline" id="camstat">${esc(cam.last||'Noch kein Wurf erkannt')}</p>
-  <figure class="heat"><canvas id="camboard" class="camboard" width="220" height="220" aria-label="Zuletzt erkannte Position"></canvas><figcaption>Zuletzt erkannte Position am Board</figcaption></figure></section>`:''}
+  <p class="muted small">Daneben liegende Würfe korrigierst du im Spiel mit „Rückgängig“ und den Tasten.</p></section>
+  </details>
   </div>`;
   camPreview();drawMiniBoard();
 }
@@ -2954,13 +3042,15 @@ async function camClick(t){
   if(t.dataset.cspeed!==undefined){cam.speed=+t.dataset.cspeed;saveCamSet();if(cam.timer){clearInterval(cam.timer);cam.timer=setInterval(camTick,camTickMs());}renderCam();return;}
   if(t.dataset.cstby!==undefined){cam.standby=CAM_STANDBY[+t.dataset.cstby][0];saveCamSet();renderCam();return;}
   if(t.dataset.cauto!==undefined){cam.autocal=t.dataset.cauto==='1';saveCamSet();if(cam.autocal){checkMoved();await camAutoAll(true);}renderCam();return;}
-  if(t.dataset.acal!==undefined){const i=+t.dataset.acal;cam.busy=`Kalibriere Kamera ${i+1} …`;renderCam();await new Promise(r=>setTimeout(r,30));const r=await camAutoCal(i);cam.busy='';cam.last=r.ok?`Kamera ${i+1} automatisch kalibriert, ${statText(r.stats)}${r.sure?'':', Lage der 20 klären die ersten Würfe'}`:`Kamera ${i+1}: ${r.why}`;renderCam();return;}
+  if(t.dataset.acal!==undefined){const i=+t.dataset.acal;cam.busy=`Kalibriere Kamera ${i+1} …`;renderCam();await new Promise(r=>setTimeout(r,30));const r=await camAutoCal(i);cam.busy='';cam.last=r.ok?`Kamera ${i+1} automatisch kalibriert, ${statText(r.stats)}`:`Kamera ${i+1}: ${r.why}`;renderCam();return;}
   if(a==='camautoall'){await camAutoAll(false);renderCam();return;}
   if(a==='camsave'){await camSaveImages();renderCam();return;}
+  if(a==='rotok'){confirmRotation();cam.last='Lage der 20 bestätigt';renderCam();return;}
+  if(a==='rotnext'){rotateAll(36);cam.last='Raster um zwei Segmente weitergedreht, bitte die 20 erneut prüfen';renderCam();return;}
   if(t.dataset.sens!==undefined){cam.sens=+t.dataset.sens;saveCamSet();renderCam();return;}
   if(t.dataset.thr!==undefined){cam.thr=[18,28,40][+t.dataset.thr];saveCamSet();renderCam();return;}
   if(t.dataset.mg!==undefined){cam.margin=[0.06,0.12,0.2][+t.dataset.mg];saveCamSet();cam.masks=[];renderCam();return;}
-  if(a==='camdiag'){cam.diag=!cam.diag;if(cam.diag&&!cam.active){cam.ref=[];}renderCam();return;}
+  if(a==='camdiag'){cam.advOpen=true;cam.diag=!cam.diag;if(cam.diag&&!cam.active){cam.ref=[];}renderCam();return;}
   if(a==='camref'){cam.ref=[];cam.prev=[];cam.state='idle';cam.last='Referenzbild neu gesetzt';renderCam();return;}
   if(a==='camtoggle'){camToggle();renderCam();return;}
   if(a==='calsnap'){calSnap();drawCal();return;}
@@ -2974,6 +3064,7 @@ async function camDevChange(sel){
   cam.slots[i]=j===''?null:cam.devices[+j].id;store.set('dart.camslots',cam.slots);
   await camRestart();renderCam();
 }
+
 
 /* ---------- Trainer ---------- */
 let sampleP=null;
@@ -3321,7 +3412,7 @@ async function tvButton(){
   const db=await getDbNs();
   if(!db){show('Der große Bildschirm funktioniert in der Pfeilerl-Version auf claude.ai.');return;}
   if(!game) return;
-  const code=game.online||game.screen||(()=>{const c=Array.from({length:5},()=>'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random()*32)]).join('');scr={code:c};game.screen=c;saveGame();return c;})();
+  const code=game.online||game.screen||(()=>{const c=makeCode();scr={code:c};game.screen=c;saveGame();return c;})();
   show(`Bildschirm-Code ${code}: Öffne Pfeilerl auf Fernseher oder PC, tippe auf „Bildschirm“ und gib den Code ein.`);
   update();
 }
@@ -3441,7 +3532,7 @@ app.addEventListener('click',e=>{
   if(t.dataset.prof!==undefined||t.dataset.jg||t.dataset.preview!==undefined||t.dataset.delset||t.dataset.walk!==undefined||t.dataset.act==='addset'){profClick(t);return;}
   if(['coach','coachai','coachstop','coachlocal','coachfb','coachask'].includes(t.dataset.act)||t.dataset.drill!==undefined||t.dataset.cplayer!==undefined){coachClick(t);return;}
   if(['online','onlcreate','onljoin'].includes(t.dataset.act)||t.dataset.oseat!==undefined||t.dataset.ojseat!==undefined){onlClick(t);return;}
-  if(['cam','camscan','camtoggle','calsnap','calundo','calcancel','calsave','calreset','camdiag','camref','camsave'].includes(t.dataset.act)||t.dataset.cal!==undefined||t.dataset.sens!==undefined||t.dataset.thr!==undefined||t.dataset.mg!==undefined||t.dataset.cres!==undefined||t.dataset.cfps!==undefined||t.dataset.cspeed!==undefined||t.dataset.cstby!==undefined||t.dataset.cauto!==undefined||t.dataset.acal!==undefined||t.dataset.act==='camautoall'){camClick(t);return;}
+  if(['cam','camscan','camtoggle','calsnap','calundo','calcancel','calsave','calreset','camdiag','camref','camsave','rotok','rotnext'].includes(t.dataset.act)||t.dataset.cal!==undefined||t.dataset.sens!==undefined||t.dataset.thr!==undefined||t.dataset.mg!==undefined||t.dataset.cres!==undefined||t.dataset.cfps!==undefined||t.dataset.cspeed!==undefined||t.dataset.cstby!==undefined||t.dataset.cauto!==undefined||t.dataset.acal!==undefined||t.dataset.act==='camautoall'){camClick(t);return;}
   if(['tour','tourstart','tourend'].includes(t.dataset.act)||t.dataset.tf||t.dataset.play){tourClick(t);return;}
   if(t.dataset.act==='stats'||t.dataset.act==='back'||t.dataset.smode||t.dataset.splayer!==undefined||t.dataset.del||t.dataset.train!==undefined){statsClick(t);return;}
   if(t.dataset.mode){setup.mode=t.dataset.mode;setupErr='';saveSetup();renderSetup();return;}
@@ -3458,6 +3549,7 @@ app.addEventListener('click',e=>{
   if(a==='addbot'){setup.players.push({name:uniqueBotName(2,-1),bot:2});setupErr='';saveSetup();renderSetup();return;}
   if(a==='modesall'||a==='modesless'){setupAll=a==='modesall';renderSetup();return;}
   if(a==='backup'){backupData();return;}
+  if(a==='legal'){renderLegal();return;}
   if(a==='start'){startGame(false);window.scrollTo(0,0);return;}
   if(a==='resume'){startGame(true);window.scrollTo(0,0);}
 });
@@ -3469,7 +3561,7 @@ app.addEventListener('change',e=>{
   if(e.target.dataset.pset!==undefined){setup.players[+e.target.dataset.pset].set=e.target.value||'';saveSetup();}
   if(e.target.dataset.pf!==undefined&&e.target.files&&e.target.files[0]) profFile(+e.target.dataset.pf,e.target.files[0]);
 });
-app.addEventListener('toggle',e=>{if(e.target.id==='more') setupMore=e.target.open;},true);
+app.addEventListener('toggle',e=>{if(e.target.id==='more') setupMore=e.target.open;if(e.target.id==='camadv') cam.advOpen=e.target.open;},true);
 app.addEventListener('keydown',e=>{if(e.target.id==='coachq'&&e.key==='Enter'){e.preventDefault();coachAsk();}});
 app.addEventListener('input',e=>{
   if(!game&&e.target.dataset.nick!==undefined){setup.players[+e.target.dataset.nick].nick=e.target.value;saveSetup();return;}
@@ -3487,7 +3579,7 @@ window.pfeilerlUpdate=()=>{
   document.getElementById('updx').onclick=()=>d.remove();
 };
 
-if(typeof window.__pfeilerlTest==='function') window.__pfeilerlTest({MODES,CATS,checkout,classify,fitCal,triangulate,startGame,throwDart,nextVisit,undo,getGame:()=>game,setup,loadRecords,onlClick,tvClick,profClick,coachClick,drawStats,sv,newAchievements,gameKey,VERSION,dupName,camErrText,CAM_MODES,fitH,projH,invH,isAngled,findTip,locate,ncc,autoCalibrate,fitEllipse,edgeRefine,edgeMeasure,edgeStats,edgePrep,hScale,edgeFit,acColorMask,acExtremes,candOf,voteRotation,getLastChoice:()=>lastChoice,acFindEllipse,acScore,acInit,acH,acRefine,acDigitCorr,acRotQ,untrusted,validGame,validCode,mergeBackup,quickModes,rememberPlayers,addRegular,localRecs,getOnl:()=>onl,getTv:()=>tv,els:null});
+if(typeof window.__pfeilerlTest==='function') window.__pfeilerlTest({MODES,CATS,checkout,classify,fitCal,triangulate,startGame,throwDart,nextVisit,undo,getGame:()=>game,setup,loadRecords,onlClick,tvClick,profClick,coachClick,drawStats,sv,newAchievements,gameKey,VERSION,dupName,makeCode,endGameForTest:()=>endGame(),camErrText,CAM_MODES,fitH,projH,invH,isAngled,findTip,locate,ncc,autoCalibrate,fitEllipse,rotateAll,rotPending,confirmRotation,edgeRefine,edgeMeasure,edgeStats,edgePrep,hScale,edgeFit,acColorMask,acExtremes,candOf,voteRotation,getLastChoice:()=>lastChoice,acFindEllipse,acScore,acInit,acH,acRefine,acDigitCorr,acRotQ,untrusted,validGame,validCode,mergeBackup,quickModes,rememberPlayers,addRegular,localRecs,getOnl:()=>onl,getTv:()=>tv,els:null});
 applyTheme();
 renderSetup();
 })();

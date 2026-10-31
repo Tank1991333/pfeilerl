@@ -5,10 +5,11 @@
 //  dist/claude-artifact.html          – Einzeldatei für claude.ai (KI-Trainer, Online, Bildschirm)
 // Manifest und Icons liegen direkt im Hauptordner und werden nicht verändert.
 import {readFileSync,writeFileSync,mkdirSync,copyFileSync,rmSync,readdirSync} from 'node:fs';
-const {version}=JSON.parse(readFileSync('package.json','utf8'));
+const {version,impressum}=JSON.parse(readFileSync('package.json','utf8'));
 const tpl=readFileSync('src/index.html','utf8');
 const css=readFileSync('src/styles.css','utf8');
-const js=readFileSync('src/app.js','utf8').replaceAll('__VERSION__',version);
+// Kamera-Teil liegt in src/camera.js und wird an der Stelle /*CAMERA*/ eingesetzt
+const js=readFileSync('src/app.js','utf8').replace('/*CAMERA*/',()=>readFileSync('src/camera.js','utf8')).replaceAll('__VERSION__',version).replace('/*IMPRESSUM*/{}',()=>JSON.stringify(impressum||{}));
 const base=tpl.replace('/*STYLES*/',()=>css).replace('/*SCRIPT*/',()=>js);
 const fontsCss=readFileSync('src/fonts.css','utf8');
 const pwaFonts=`<link rel="preload" href="fonts/barlow-400.woff2" as="font" type="font/woff2" crossorigin>

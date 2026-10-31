@@ -1,7 +1,7 @@
 // Pfeilerl-Tests ohne Browser: lädt src/app.js in einer simulierten Umgebung.
 // Aufruf: npm test
 const vm=require('vm'),fs=require('fs'),path=require('path');
-const SRC=fs.readFileSync(path.join(__dirname,'..','src','app.js'),'utf8');
+const SRC=fs.readFileSync(path.join(__dirname,'..','src','app.js'),'utf8').replace('/*CAMERA*/',()=>fs.readFileSync(path.join(__dirname,'..','src','camera.js'),'utf8'));
 let passed=0,failed=0;
 function ok(cond,name,extra){if(cond){passed++;console.log('  ✓ '+name);}else{failed++;console.log('  ✗ '+name+(extra?'  → '+extra:''));}}
 
@@ -171,6 +171,20 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
    ok(/anderen Programm/.test(api.camErrText({name:'NotReadableError'})),'Belegt: Hinweis auf anderes Programm');
    ok(/Keine Kamera/.test(api.camErrText({name:'NotFoundError'})),'Nicht gefunden: Hinweis auf USB');
    ok(/\(Seltsam\)/.test(api.camErrText({name:'Seltsam'})),'Unbekannt: Fehlername wird angezeigt');}
+
+  console.log('Online: Codes und Aufräumen');
+  {const {api}=env();
+   const cs=Array.from({length:200},()=>api.makeCode());
+   ok(cs.every(c=>/^[A-HJ-NP-Z2-9]{5}$/.test(c))&&new Set(cs).size>190,'Codes: 5 Zeichen, ohne 0/O/1/I, zufällig');
+   const A=env({withClaude:true,name:'e'}),B=env({withClaude:true,name:'f'});
+   await fakeDb.doc('online/ALT23').set({state:'{}',rev:1,ts:Date.now()-25*3600*1000});await sleep(5);
+   B.els.onlcode={value:'ALT23'};await B.api.onlClick({dataset:{act:'online'}});await sleep(10);await B.api.onlClick({dataset:{act:'onljoin'}});await sleep(10);
+   ok(/Kein laufendes Spiel/.test(B.els.app.innerHTML),'Spiel älter als 24 Stunden lässt sich nicht mehr betreten',B.els.app.innerHTML.slice(0,120));
+   A.api.setup.players=[{name:'Gina'},{name:'Hans'}];A.api.setup.mode='x01';
+   await A.api.onlClick({dataset:{act:'online'}});await sleep(10);await A.api.onlClick({dataset:{act:'onlcreate'}});await sleep(20);
+   const code=A.api.getOnl().code;const before=(await fakeDb.doc('online/'+code).get()).exists;
+   A.api.endGameForTest();await sleep(20);
+   ok(before&&!(await fakeDb.doc('online/'+code).get()).exists,'Gastgeber beendet: gemeinsames Spiel wird gelöscht');}
 
   console.log('Kamera-Triangulation');
   {const {api}=env();
